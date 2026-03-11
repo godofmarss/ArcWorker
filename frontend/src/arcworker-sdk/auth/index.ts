@@ -22,20 +22,33 @@ export class AuthModule {
      */
     public async loginWithEmail(email: string): Promise<{ address: string }> {
         if (this.userToken && this.encryptionKey) {
-            // Validate session ?
             return { address: await this.getWalletAddress() };
         }
 
         const circleSdk = this.sdk.getCircleSdk();
         if (!circleSdk) throw new Error("SDK not initialized in browser");
 
-        const deviceId = await circleSdk.getDeviceId();
+        // Fix: persist device ID manually across mobile sessions
+        let deviceId = localStorage.getItem('arc_device_id');
+        if (!deviceId) {
+            deviceId = await circleSdk.getDeviceId();
+            if (deviceId) {
+                localStorage.setItem('arc_device_id', deviceId);
+            }
+        } else {
+            // Re-register the stored device ID with Circle SDK
+            try {
+                (circleSdk as any).setDeviceId(deviceId);
+            } catch {
+                // If setDeviceId not available, fall back to fresh one
+                deviceId = await circleSdk.getDeviceId();
+                localStorage.setItem('arc_device_id', deviceId);
+            }
+        }
 
-        // Request OTP
         const authRes = await axios.post('/api/circle/auth/email', { email, deviceId });
         const { deviceToken, deviceEncryptionKey, otpToken, appId } = authRes.data;
 
-        // Challenge Circle
         return new Promise((resolve, reject) => {
             circleSdk.updateConfigs({
                 appSettings: { appId },
@@ -79,7 +92,6 @@ export class AuthModule {
                     else resolve(res);
                 });
             });
-            // Poll for address... (Simplified for now)
             return await this.pollAddress();
         }
 
@@ -99,11 +111,11 @@ export class AuthModule {
 
     // Check Address (Public)
     public async getWalletAddress(): Promise<string> {
-        // Logic to get stored address or fetch
         return this.pollAddress();
     }
 
     private static readonly STORAGE_KEYS = [
+        'arc_device_id',
         'arc_session_token',
         'arc_encryption_key',
         'arc_user',
@@ -130,7 +142,6 @@ export class AuthModule {
 
     public static clearAllSessions() {
         if (typeof localStorage === 'undefined') return;
-        // Aggressive cleanup: remove EVERYTHING starting with arc_
         Object.keys(localStorage).forEach(key => {
             if (key.startsWith('arc_')) {
                 localStorage.removeItem(key);
