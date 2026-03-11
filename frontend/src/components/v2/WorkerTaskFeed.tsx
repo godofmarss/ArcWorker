@@ -22,19 +22,17 @@ import { useAccount, useWriteContract, useWaitForTransactionReceipt } from 'wagm
 import { CONTRACTS } from '@/utils/contracts';
 import { getSdk } from '@/utils/circle';
 
-// Shared Module Configuration (Mirrors CampaignCreatorModal)
-// In a real app, this would be imported from a shared constants file.
 const MODULE_INFO: Record<string, { title: string, category: 'vision' | 'nlp' | 'audio' | 'data' }> = {
     'vision-bbox': { title: "Object Detection (Bounding Boxes)", category: 'vision' },
     'vision-class': { title: "Image Classification", category: 'vision' },
     'vision-seg': { title: "Semantic Segmentation", category: 'vision' },
-    'image-classification': { title: "Image Classification", category: 'vision' }, // Sync from Creator
-    'object-verification': { title: "Object Verification", category: 'vision' },   // Sync from Creator
+    'image-classification': { title: "Image Classification", category: 'vision' },
+    'object-verification': { title: "Object Verification", category: 'vision' },
     'nlp-ner': { title: "Named Entity Recognition (NER)", category: 'nlp' },
     'nlp-sentiment': { title: "Sentiment Analysis", category: 'nlp' },
     'nlp-trans': { title: "Translation", category: 'nlp' },
-    'text-classification': { title: "Text Classification", category: 'nlp' },      // Sync from Creator
-    'language-detection': { title: "Language Detection", category: 'nlp' },        // Sync from Creator
+    'text-classification': { title: "Text Classification", category: 'nlp' },
+    'language-detection': { title: "Language Detection", category: 'nlp' },
     'audio-transcribe': { title: "Audio Transcription", category: 'audio' },
     'audio-collect': { title: "Speech Collection", category: 'audio' },
     'data-enrich': { title: "Data Enrichment", category: 'data' },
@@ -43,7 +41,7 @@ const MODULE_INFO: Record<string, { title: string, category: 'vision' | 'nlp' | 
 
 interface TaskOpportunity {
     id: string;
-    moduleId: string; // Links to MODULE_INFO keys
+    moduleId: string;
     title: string;
     clientName: string;
     description: string;
@@ -52,12 +50,11 @@ interface TaskOpportunity {
     difficulty: 'Easy' | 'Medium' | 'Hard';
     verification: 'Consensus' | 'Manual' | 'Golden Set' | 'Instant Auto-Pay' | 'Manual Review';
     availableTasks: number;
-    tags: string[]; // Extra tags
-    metadata?: any; // Full metadata for dynamic config
-    groupKey?: string; // Unique identifier for the campaign group
+    tags: string[];
+    metadata?: any;
+    groupKey?: string;
 }
 
-// Mock Data is now only used as a fallback or for development
 const MOCK_TASKS: TaskOpportunity[] = [
     {
         id: 'task-101',
@@ -124,15 +121,12 @@ interface WorkerTaskFeedProps {
 export const WorkerTaskFeed: React.FC<WorkerTaskFeedProps> = ({ onBack }) => {
     const { address: wagmiAddress, isConnected } = useAccount();
     const [circleAddress, setCircleAddress] = useState<string | null>(null);
-
-    // Dynamic Address Resolution: Prioritize Wagmi (Metamask), fallback to Circle
     const userAddress = wagmiAddress || circleAddress;
-
     const { allTasks: rawTasks, isLoading, refetch, markAsParticipated } = useTasks(undefined, userAddress || undefined);
     const [selectedTask, setSelectedTask] = useState<any>(null);
     const [expandedTaskId, setExpandedTaskId] = useState<string | null>(null);
+    const [searchQuery, setSearchQuery] = useState('');
 
-    // Sync Circle address from localStorage
     useEffect(() => {
         if (typeof window !== 'undefined') {
             const saved = localStorage.getItem('arc_user');
@@ -146,129 +140,83 @@ export const WorkerTaskFeed: React.FC<WorkerTaskFeedProps> = ({ onBack }) => {
         }
     }, []);
 
-    // Local blacklist for immediate feedback, persisted per-user to localStorage
     const [recentlySubmitted, setRecentlySubmitted] = useState<Set<string>>(new Set());
 
-    // Load user-specific submission cache
     useEffect(() => {
         if (typeof window !== 'undefined' && userAddress) {
             const cacheKey = `arc_submitted_tasks_${userAddress.toLowerCase()}`;
             const saved = localStorage.getItem(cacheKey);
-            if (saved) {
-                setRecentlySubmitted(new Set(JSON.parse(saved)));
-            } else {
-                setRecentlySubmitted(new Set());
-            }
+            if (saved) setRecentlySubmitted(new Set(JSON.parse(saved)));
+            else setRecentlySubmitted(new Set());
         } else if (!userAddress) {
             setRecentlySubmitted(new Set());
         }
     }, [userAddress]);
 
-    // Persist changes to user-specific localStorage
     useEffect(() => {
         if (typeof window !== 'undefined' && userAddress && recentlySubmitted.size > 0) {
             const cacheKey = `arc_submitted_tasks_${userAddress.toLowerCase()}`;
-            const cacheValue = JSON.stringify(Array.from(recentlySubmitted));
-            localStorage.setItem(cacheKey, cacheValue);
+            localStorage.setItem(cacheKey, JSON.stringify(Array.from(recentlySubmitted)));
         }
     }, [recentlySubmitted, userAddress]);
 
-    // URL Synchronization Helper
     const router = useRouter();
     const searchParams = useSearchParams();
 
     const updateUrl = (taskId: string | number | null) => {
         const params = new URLSearchParams(searchParams.toString());
-        if (taskId) {
-            params.set('taskId', taskId.toString());
-        } else {
-            params.delete('taskId');
-        }
+        if (taskId) params.set('taskId', taskId.toString());
+        else params.delete('taskId');
         router.replace(`?${params.toString()}`, { scroll: false });
     };
 
     const availableTasks: TaskOpportunity[] = useMemo(() => {
-        if (!rawTasks) {
-            return [];
-        }
-
+        if (!rawTasks) return [];
         const now = Math.floor(Date.now() / 1000);
         const currentUserLower = userAddress?.toLowerCase();
 
-        // Helper to determine unique campaign identifier - MODIFIED TO BE MORE ROBUST
         const getGroupKey = (t: any) => {
-            // Priority 0: Explicit campaign ID if we adds it later
             if (t.campaignId) return t.campaignId.toString();
-
-            // Priority 1: Cleaned Title + Agency (Most stable)
             const cleanTitle = (t.title || 'Untitled').trim().toLowerCase();
             const agency = (t.agency || 'Unknown').toLowerCase();
-
-            if (cleanTitle !== 'unknown' && cleanTitle !== 'untitled') {
-                return `campaign-${cleanTitle}-${agency}`;
-            }
-
-            // Priority 2: metadataHash if it's a real hash or long enough JSON
-            if (t.metadataHash && t.metadataHash.length > 5) {
-                // Return first 100 chars to avoid huge keys but maintain uniqueness
-                return `hash-${t.metadataHash.substring(0, 100)}`;
-            }
-
-            return `single-${t.id}`; // Fallback: Individual task
+            if (cleanTitle !== 'unknown' && cleanTitle !== 'untitled') return `campaign-${cleanTitle}-${agency}`;
+            if (t.metadataHash && t.metadataHash.length > 5) return `hash-${t.metadataHash.substring(0, 100)}`;
+            return `single-${t.id}`;
         };
 
-        // 1. Identify campaigns where the current worker has already participated
         const participatedGroups = new Set<string>();
-
         if (currentUserLower) {
             rawTasks.forEach((t: any) => {
                 const groupKey = getGroupKey(t);
                 const idStr = t.id.toString();
-
-                // Check if User Participated (RPC) OR Locally Submitted (Cache)
                 const isParticipated = t.hasParticipated ||
                     recentlySubmitted.has(idStr) ||
-                    recentlySubmitted.has(groupKey) || // NEW: Campaign-level block
+                    recentlySubmitted.has(groupKey) ||
                     (t.metadataHash && recentlySubmitted.has(t.metadataHash));
-
-                if (isParticipated) {
-                    participatedGroups.add(groupKey);
-                }
+                if (isParticipated) participatedGroups.add(groupKey);
             });
         }
 
-        // 2. Group available tasks by GroupKey
         const groups: Record<string, any[]> = {};
-
         rawTasks.forEach((t: any) => {
             const groupKey = getGroupKey(t);
-
             const isAvailable = (t.status === 0 || t.status === 1) &&
                 Number(t.currentSubmissions) < Number(t.requiredSubmissions) &&
                 Number(t.deadline) > now &&
                 !recentlySubmitted.has(t.id.toString()) &&
                 !recentlySubmitted.has(groupKey) &&
                 !t.hasParticipated;
-
             if (isAvailable) {
                 if (!groups[groupKey]) groups[groupKey] = [];
                 groups[groupKey].push(t);
             }
         });
 
-        // 3. Transform groups into TaskOpportunities, skipping participated ones
         const opportunities: TaskOpportunity[] = [];
-
         Object.entries(groups).forEach(([groupKey, tasksInGroup]) => {
-            // CRITICAL: Prevent double dipping
-            // If user has done ANY task in this group (Campaign), they cannot see ANY other tasks in this group.
-            if (participatedGroups.has(groupKey)) {
-                return;
-            }
-
+            if (participatedGroups.has(groupKey)) return;
             const representative = tasksInGroup[0];
             const metadata = representative.metadata || {};
-
             let verificationLabel = metadata.verification || metadata.verificationStrategy || 'Manual Review';
             if (representative.correctAnswerHash && representative.correctAnswerHash !== '0x0000000000000000000000000000000000000000000000000000000000000000') {
                 verificationLabel = 'Instant Auto-Pay';
@@ -277,112 +225,82 @@ export const WorkerTaskFeed: React.FC<WorkerTaskFeedProps> = ({ onBack }) => {
             } else {
                 verificationLabel = 'Manual Review';
             }
-
             const moduleId = metadata.tmpl || metadata.moduleId || metadata.mod || 'vision-class';
             const category = MODULE_INFO[moduleId]?.category || 'vision';
-
             opportunities.push({
                 id: representative.id.toString(),
-                moduleId: moduleId,
-                title: metadata.title || representative.title || "Untreated Task",
+                moduleId,
+                title: metadata.title || representative.title || "Untitled Task",
                 clientName: representative.agency?.substring(0, 8) + '...',
                 description: metadata.desc || representative.description || "No description provided.",
                 rewardPerTask: parseFloat(representative.reward),
                 timePerTaskSec: metadata.timePerTaskSec || 45,
                 difficulty: metadata.diff || metadata.difficulty || 'Medium',
                 verification: verificationLabel,
-                availableTasks: tasksInGroup.length, // Shows how many tasks are in this campaign
+                availableTasks: tasksInGroup.length,
                 tags: metadata.tags || [category.toUpperCase()],
                 metadata: { ...metadata, metadataHash: representative.metadataHash },
-                groupKey: groupKey // Add this
+                groupKey
             });
         });
 
         return opportunities;
     }, [rawTasks, userAddress, recentlySubmitted]);
 
-    // Only show mock tasks if there are NO real tasks from the contract at all
     const tasksToShow = (rawTasks && rawTasks.length > 0) ? availableTasks : MOCK_TASKS;
 
-    // Dynamic Config Generator based on task metadata
+    const filteredTasks = useMemo(() => {
+        if (!searchQuery.trim()) return tasksToShow;
+        const q = searchQuery.toLowerCase();
+        return tasksToShow.filter(t =>
+            t.title.toLowerCase().includes(q) ||
+            t.description.toLowerCase().includes(q) ||
+            t.tags.some(tag => tag.toLowerCase().includes(q))
+        );
+    }, [tasksToShow, searchQuery]);
+
     const getTaskConfig = (task: any): TaskConfig => {
         const metadata = task.metadata || {};
         const moduleId = metadata.tmpl || metadata.moduleId || metadata.mod || 'vision-class';
         const instruction = metadata.desc || "Follow the prompt to complete the task.";
-
-        // Map options from metadata to classes format
         const options: string[] = Array.isArray(metadata.options) ? metadata.options : [];
         const classes = options.map((opt, i) => ({
-            id: opt, // Use name as ID for easier answer matching
+            id: opt,
             name: opt,
-            color: `hsl(${(i * 137) % 360}, 70%, 50%)` // Stable random colors
+            color: `hsl(${(i * 137) % 360}, 70%, 50%)`
         }));
 
         switch (moduleId) {
             case 'vision-bbox':
-                return {
-                    instruction,
-                    tools: ['draw', 'select'],
-                    classes: classes.length > 0 ? classes : [
-                        { id: 1, name: 'Object A', color: '#fbbf24' },
-                        { id: 2, name: 'Object B', color: '#f97316' }
-                    ]
-                };
+                return { instruction, tools: ['draw', 'select'], classes: classes.length > 0 ? classes : [{ id: 1, name: 'Object A', color: '#fbbf24' }, { id: 2, name: 'Object B', color: '#f97316' }] };
             case 'vision-seg':
-                return {
-                    instruction,
-                    tools: ['poly', 'select'],
-                    classes: classes
-                };
+                return { instruction, tools: ['poly', 'select'], classes };
             case 'nlp-ner':
-                return {
-                    instruction,
-                    entityTags: metadata.entityTags || ['Person', 'Organization', 'Location'], // Fallback defaults
-                    classes: [] // No classification classes for NER
-                };
+                return { instruction, entityTags: metadata.entityTags || ['Person', 'Organization', 'Location'], classes: [] };
             case 'image-classification':
             case 'vision-class':
             case 'object-verification':
-                return {
-                    instruction,
-                    classes: classes
-                };
+                return { instruction, classes };
             case 'text-classification':
             case 'nlp-sentiment':
             case 'language-detection':
-                // Provide default options if none exist for common types
-                const nlpClasses = classes.length > 0 ? classes : (
-                    moduleId === 'nlp-sentiment' ? [
-                        { id: 'Positive', name: 'Positive', color: '#10b981' },
-                        { id: 'Neutral', name: 'Neutral', color: '#6b7280' },
-                        { id: 'Negative', name: 'Negative', color: '#ef4444' }
-                    ] : []
-                );
-                return {
-                    instruction,
-                    classes: nlpClasses,
-                    hasTranslationInput: moduleId === 'nlp-trans' || moduleId === 'language-detection'
-                };
+                const nlpClasses = classes.length > 0 ? classes : (moduleId === 'nlp-sentiment' ? [
+                    { id: 'Positive', name: 'Positive', color: '#10b981' },
+                    { id: 'Neutral', name: 'Neutral', color: '#6b7280' },
+                    { id: 'Negative', name: 'Negative', color: '#ef4444' }
+                ] : []);
+                return { instruction, classes: nlpClasses, hasTranslationInput: moduleId === 'nlp-trans' || moduleId === 'language-detection' };
             default:
-                return {
-                    instruction,
-                    classes: classes
-                };
+                return { instruction, classes };
         }
     };
 
     const [isSubmitting, setIsSubmitting] = useState(false);
     const { writeContractAsync: writeSubmit, data: submitHash } = useWriteContract();
+    const { isLoading: isSubmitConfirming, isSuccess: isSubmitConfirmed } = useWaitForTransactionReceipt({ hash: submitHash });
 
-    // NEW: Wait for transaction on-chain confirmation
-    const { isLoading: isSubmitConfirming, isSuccess: isSubmitConfirmed } = useWaitForTransactionReceipt({
-        hash: submitHash
-    });
-
-    // Handle auto-refetch when transaction is confirmed
     useEffect(() => {
         if (isSubmitConfirmed) {
-            console.log("[WorkerFeed] Submission confirmed on-chain, refetching tasks...");
             refetch();
             setIsSubmitting(false);
             setSelectedTask(null);
@@ -391,49 +309,29 @@ export const WorkerTaskFeed: React.FC<WorkerTaskFeedProps> = ({ onBack }) => {
 
     const handleSubmission = async (result: any) => {
         if (!selectedTask) return;
-
         try {
             setIsSubmitting(true);
-
-            // Extract the most relevant answer string for on-chain verification
             const answer =
                 (result.output.boxes && result.output.boxes.length > 0) ? JSON.stringify(result.output.boxes) :
                     (result.output.polygons && result.output.polygons.length > 0) ? JSON.stringify(result.output.polygons) :
                         result.output.classification ||
                         result.output.text ||
-                        (result.output.ner ? JSON.stringify(result.output.ner) : "") ||
-                        "";
+                        (result.output.ner ? JSON.stringify(result.output.ner) : "") || "";
 
-            console.log(`[Worker Feed] Submitting answer: "${answer}" for Task #${selectedTask.id}`);
-
-            // Helper to trigger verification
             const triggerAutoVerify = async (id: string) => {
                 try {
-                    console.log(`[Worker Feed] Triggering auto-verification for task ${id}...`);
-                    const res = await fetch('/api/tasks/auto-verify', {
-                        method: 'POST',
-                        body: JSON.stringify({ taskId: id })
-                    });
+                    const res = await fetch('/api/tasks/auto-verify', { method: 'POST', body: JSON.stringify({ taskId: id }) });
                     const d = await res.json();
-                    if (d.success) {
-                        alert(`Auto-verification Success: ${d.message}`);
-                    } else {
-                        alert(`Auto-verification Failed: ${d.error}`);
-                    }
-                } catch (e: any) {
-                    console.error("Auto-verify trigger failed:", e);
-                    alert(`Auto-verification Error: ${e.message}`);
-                }
+                    if (d.success) alert(`Auto-verification Success: ${d.message}`);
+                    else alert(`Auto-verification Failed: ${d.error}`);
+                } catch (e: any) { alert(`Auto-verification Error: ${e.message}`); }
             };
 
-            // DETERMINE WALLET TYPE PRIORITY
             const storedUser = localStorage.getItem('arc_user');
             const userProfile = storedUser ? JSON.parse(storedUser) : {};
             const isCircleUser = userProfile.walletType === 'circle' || !!userProfile.userId;
 
-            // Only use Wagmi if connected AND NOT strictly a Circle user
             if (isConnected && !isCircleUser) {
-                // EOA Flow
                 await writeSubmit({
                     address: CONTRACTS.TaskEscrow.address,
                     abi: CONTRACTS.TaskEscrow.abi,
@@ -441,13 +339,7 @@ export const WorkerTaskFeed: React.FC<WorkerTaskFeedProps> = ({ onBack }) => {
                     args: [BigInt(selectedTask.id), answer],
                 });
                 alert("Task submitted successfully via Wallet!");
-
-                // Trigger Verification (Only for Auto/Consensus)
-                if (selectedTask.verification !== 'Manual Review') {
-                    triggerAutoVerify(selectedTask.id);
-                }
-
-                // Optimistic Update
+                if (selectedTask.verification !== 'Manual Review') triggerAutoVerify(selectedTask.id);
                 setRecentlySubmitted(prev => {
                     const next = new Set(prev);
                     next.add(selectedTask.id);
@@ -455,12 +347,10 @@ export const WorkerTaskFeed: React.FC<WorkerTaskFeedProps> = ({ onBack }) => {
                     if (selectedTask.metadata?.metadataHash) next.add(selectedTask.metadata.metadataHash);
                     return next;
                 });
-                markAsParticipated(selectedTask.id); // Force persistent removal
-                // refetch() and cleanup happen in useEffect [isSubmitConfirmed]
+                markAsParticipated(selectedTask.id);
                 return;
             }
 
-            // Circle Flow
             const circleUser = localStorage.getItem('arc_user');
             const sessionToken = localStorage.getItem('arc_session_token');
             const encryptionKey = localStorage.getItem('arc_encryption_key');
@@ -468,29 +358,18 @@ export const WorkerTaskFeed: React.FC<WorkerTaskFeedProps> = ({ onBack }) => {
             if (circleUser) {
                 const user = JSON.parse(circleUser);
                 const userId = user.id || user.userId;
-
                 const res = await fetch('/api/circle/submit-task', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        userId,
-                        taskId: selectedTask.id,
-                        answer,
-                        userToken: sessionToken || undefined,
-                        encryptionKey: encryptionKey || undefined
-                    })
+                    body: JSON.stringify({ userId, taskId: selectedTask.id, answer, userToken: sessionToken || undefined, encryptionKey: encryptionKey || undefined })
                 });
-
                 const data = await res.json();
                 if (data.error) throw new Error(data.error);
-
                 if (data.challengeId) {
                     const sdk = getSdk();
                     if (!sdk) throw new Error("Circle SDK not initialized");
-
                     sdk.setAppSettings({ appId: data.appId });
                     sdk.setAuthentication({ userToken: data.userToken, encryptionKey: data.encryptionKey });
-
                     await new Promise((resolve, reject) => {
                         sdk.execute(data.challengeId, (error: any, result: any) => {
                             if (error) reject(error);
@@ -498,27 +377,17 @@ export const WorkerTaskFeed: React.FC<WorkerTaskFeedProps> = ({ onBack }) => {
                         });
                     });
                 }
-
                 alert("Task submitted successfully via Circle!");
-
-                // Trigger Verification (Only for Auto/Consensus)
-                // NOW SAFE: The SDK has confirmed execution!
-                if (selectedTask.verification !== 'Manual Review') {
-                    triggerAutoVerify(selectedTask.id);
-                }
-
-                // Optimistic Update
+                if (selectedTask.verification !== 'Manual Review') triggerAutoVerify(selectedTask.id);
                 setRecentlySubmitted(prev => {
                     const next = new Set(prev);
                     next.add(selectedTask.id);
                     if (selectedTask.groupKey) next.add(selectedTask.groupKey);
                     if (selectedTask.metadata?.metadataHash) next.add(selectedTask.metadata.metadataHash);
-                    console.log(`[Worker Feed] Marking participated (Circle): ID=${selectedTask.id}, Group=${selectedTask.groupKey}`);
                     return next;
                 });
-                markAsParticipated(selectedTask.id); // Force persistent removal
-                refetch(); // Trigger background refresh
-
+                markAsParticipated(selectedTask.id);
+                refetch();
                 setSelectedTask(null);
                 updateUrl(null);
             } else {
@@ -536,7 +405,6 @@ export const WorkerTaskFeed: React.FC<WorkerTaskFeedProps> = ({ onBack }) => {
         const metadata = selectedTask.metadata || {};
         const isVision = selectedTask.moduleId?.includes('vision') || selectedTask.moduleId?.includes('image') || selectedTask.moduleId?.includes('object');
         const isNLP = selectedTask.moduleId?.includes('nlp') || selectedTask.moduleId?.includes('text') || selectedTask.moduleId?.includes('language');
-
         const taskData: TaskData = {
             id: selectedTask.id.toString(),
             type: isVision ? 'vision' : isNLP ? 'nlp' : 'form',
@@ -548,24 +416,16 @@ export const WorkerTaskFeed: React.FC<WorkerTaskFeedProps> = ({ onBack }) => {
             textContent: metadata.content || metadata.textContent || "Loading task content...",
             formData: metadata.questions || metadata.formData
         };
-
         return (
             <WorkerTaskInterface
                 task={taskData}
                 config={getTaskConfig(selectedTask)}
-                onExit={() => {
-                    setSelectedTask(null);
-                    updateUrl(null);
-                }}
-                onSubmit={(res) => {
-                    handleSubmission(res);
-                    updateUrl(null);
-                }}
+                onExit={() => { setSelectedTask(null); updateUrl(null); }}
+                onSubmit={(res) => { handleSubmission(res); updateUrl(null); }}
             />
         );
     }
 
-    // Helper to get difficulty color
     const getDifficultyColor = (diff: string) => {
         switch (diff) {
             case 'Easy': return 'bg-green-100 text-green-700 border-green-200';
@@ -575,7 +435,6 @@ export const WorkerTaskFeed: React.FC<WorkerTaskFeedProps> = ({ onBack }) => {
         }
     };
 
-    // Helper to get verification badge style
     const getVerificationStyle = (ver: string) => {
         switch (ver) {
             case 'Consensus': return 'text-blue-600 bg-blue-50 border-blue-100 italic';
@@ -596,157 +455,143 @@ export const WorkerTaskFeed: React.FC<WorkerTaskFeedProps> = ({ onBack }) => {
     };
 
     return (
-        <div className="w-full max-w-7xl mx-auto p-6 bg-gray-50 min-h-screen">
-            {/* Header Section */}
-            <div className="flex justify-between items-center mb-6">
-                <div>
-                    <button
-                        onClick={onBack}
-                        className="flex items-center gap-2 text-xs font-bold text-gray-400 hover:text-gray-700 mb-2 transition"
-                    >
-                        <ArrowLeft className="w-3 h-3" /> Back to Dashboard
-                    </button>
-                    <h1 className="text-2xl font-bold text-gray-900 flex gap-2 items-center">
+        <div className="w-full max-w-7xl mx-auto bg-gray-50 min-h-screen">
+            {/* Header */}
+            <div className="mb-4 md:mb-6">
+                <button
+                    onClick={onBack}
+                    className="flex items-center gap-1.5 text-xs font-bold text-gray-400 hover:text-gray-700 mb-2 transition"
+                >
+                    <ArrowLeft className="w-3 h-3" /> Back to Dashboard
+                </button>
+
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <h1 className="text-lg md:text-2xl font-bold text-gray-900 flex gap-2 items-center">
                         Task Market
-                        <span className="text-xs font-normal text-gray-400 border border-gray-200 px-2 py-0.5 rounded-full">{tasksToShow.length} active</span>
+                        <span className="text-xs font-normal text-gray-400 border border-gray-200 px-2 py-0.5 rounded-full">
+                            {filteredTasks.length} active
+                        </span>
                     </h1>
-                </div>
-                <div className="flex gap-3 items-center">
-                    <div className="relative">
-                        <Search className="w-4 h-4 absolute left-3 top-2.5 text-gray-400" />
+
+                    {/* Search bar - full width on mobile */}
+                    <div className="relative w-full sm:w-auto">
+                        <Search className="w-3.5 h-3.5 absolute left-3 top-2.5 text-gray-400" />
                         <input
                             type="text"
                             placeholder="Search tasks..."
-                            className="pl-10 pr-4 py-2 border border-gray-200 rounded-lg bg-white focus:ring-2 focus:ring-blue-500 focus:outline-none text-xs"
+                            value={searchQuery}
+                            onChange={e => setSearchQuery(e.target.value)}
+                            className="w-full sm:w-56 pl-9 pr-4 py-2 border border-gray-200 rounded-lg bg-white focus:ring-2 focus:ring-blue-500 focus:outline-none text-xs"
                         />
                     </div>
-
-                    <button
-                        onClick={onBack}
-                        className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-200 text-gray-400 hover:text-gray-600 transition"
-                        title="Close Market"
-                    >
-                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" /></svg>
-                    </button>
                 </div>
             </div>
 
-            {/* Task Grid - Compact Layout */}
+            {/* Task List */}
             {isLoading ? (
-                <div className="flex flex-col items-center justify-center py-20 animate-pulse">
-                    <div className="w-12 h-12 bg-gray-200 rounded-full mb-4"></div>
-                    <div className="h-4 w-48 bg-gray-200 rounded mb-2"></div>
-                    <div className="h-3 w-32 bg-gray-100 rounded"></div>
+                <div className="flex flex-col items-center justify-center py-16 animate-pulse">
+                    <div className="w-10 h-10 bg-gray-200 rounded-full mb-4"></div>
+                    <div className="h-4 w-40 bg-gray-200 rounded mb-2"></div>
+                    <div className="h-3 w-28 bg-gray-100 rounded"></div>
+                </div>
+            ) : filteredTasks.length === 0 ? (
+                <div className="py-16 text-center bg-white border border-dashed border-gray-200 rounded-xl">
+                    <p className="text-gray-400 text-sm">No tasks found{searchQuery ? ' matching your search' : ''}.</p>
                 </div>
             ) : (
                 <div className="grid grid-cols-1 gap-3">
-                    {tasksToShow.map((task) => {
+                    {filteredTasks.map((task) => {
                         const moduleInfo = MODULE_INFO[task.moduleId] || { title: 'Unknown Task', category: 'data' };
                         const isExpanded = expandedTaskId === task.id;
 
                         return (
-                            <div key={task.id} className={`bg-white rounded-lg shadow-sm border border-gray-200 hover:shadow-md transition-all group overflow-hidden ${isExpanded ? 'ring-2 ring-blue-500/20' : ''}`}>
+                            <div key={task.id}
+                                className={`bg-white rounded-lg shadow-sm border border-gray-200 hover:shadow-md transition-all overflow-hidden ${isExpanded ? 'ring-2 ring-blue-500/20' : ''}`}>
 
-                                <div className="p-3 relative">
-                                    {/* Thin Left Accent Bar */}
-                                    <div className={`absolute left-0 top-0 bottom-0 w-1 ${task.difficulty === 'Easy' ? 'bg-green-500' :
-                                        task.difficulty === 'Medium' ? 'bg-yellow-500' : 'bg-red-500'
-                                        }`}></div>
+                                <div className="p-3 md:p-4 relative">
+                                    {/* Left accent bar */}
+                                    <div className={`absolute left-0 top-0 bottom-0 w-1 ${task.difficulty === 'Easy' ? 'bg-green-500' : task.difficulty === 'Medium' ? 'bg-yellow-500' : 'bg-red-500'}`}></div>
 
-                                    <div className="flex items-center justify-between ml-3 gap-6">
-                                        {/* Main Content Area - Wider */}
-                                        <div className="flex-1 min-w-0" onClick={() => setExpandedTaskId(isExpanded ? null : task.id)}>
-                                            <div className="flex items-center gap-2 mb-1">
-                                                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">{task.clientName}</span>
-                                                <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-medium border ${getVerificationStyle(task.verification)} flex items-center gap-1 shadow-sm`}>
-                                                    {task.verification === 'Instant Auto-Pay' ? <Zap className="w-2.5 h-2.5 fill-current" /> :
-                                                        task.verification === 'Consensus' ? <Users className="w-2.5 h-2.5" /> :
-                                                            <Clock className="w-2.5 h-2.5" />}
-                                                    {task.verification}
-                                                </span>
-                                            </div>
-
-                                            <div className="flex flex-col gap-1">
-                                                <h3 className="text-base font-bold text-gray-900 group-hover:text-blue-600 transition-colors">{task.title}</h3>
-                                                {!isExpanded && <p className="text-gray-500 text-xs leading-relaxed truncate">{task.description}</p>}
-                                            </div>
-
-                                            {/* Tags Row - Compact */}
-                                            <div className="flex items-center gap-2 mt-2">
-                                                <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${getDifficultyColor(task.difficulty)}`}>
-                                                    {task.difficulty}
-                                                </span>
-
-                                                {/* Dynamic Module Tag */}
-                                                <span className="flex items-center gap-1 text-gray-500 bg-gray-50 px-2 py-0.5 rounded text-[10px] font-medium border border-gray-100">
-                                                    {getModuleIcon(moduleInfo.category)}
-                                                    {moduleInfo.title}
-                                                </span>
-
-                                                <span className="flex items-center gap-1 text-gray-400 text-[10px]">
-                                                    <Clock className="w-3 h-3" />
-                                                    ~{task.timePerTaskSec}s
-                                                </span>
-
-                                                <span className="flex items-center gap-1 text-gray-400 text-[10px]">
-                                                    <Target className="w-3 h-3" />
-                                                    {task.availableTasks} left
-                                                </span>
-                                            </div>
+                                    <div className="ml-3">
+                                        {/* Top row: client + verification badge */}
+                                        <div className="flex items-center gap-2 mb-1 flex-wrap">
+                                            <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">{task.clientName}</span>
+                                            <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-medium border ${getVerificationStyle(task.verification)} flex items-center gap-1`}>
+                                                {task.verification === 'Instant Auto-Pay' ? <Zap className="w-2.5 h-2.5 fill-current" /> :
+                                                    task.verification === 'Consensus' ? <Users className="w-2.5 h-2.5" /> :
+                                                        <Clock className="w-2.5 h-2.5" />}
+                                                {task.verification}
+                                            </span>
                                         </div>
 
-                                        {/* Right Side Actions - Horizontal Layout for compact height */}
-                                        <div className="flex items-center gap-4 border-l border-gray-100 pl-4">
-                                            <div className="text-right min-w-[80px]">
-                                                <div className="text-xl font-bold text-gray-900">
-                                                    <span className="text-sm text-gray-400 font-medium">$</span>{task.rewardPerTask.toFixed(2)}
-                                                </div>
-                                                <div className="text-[10px] text-gray-400 uppercase">per task</div>
+                                        {/* Title */}
+                                        <h3 className="text-sm md:text-base font-bold text-gray-900 mb-1 leading-snug">{task.title}</h3>
+
+                                        {/* Description - only when not expanded */}
+                                        {!isExpanded && (
+                                            <p className="text-gray-500 text-xs leading-relaxed line-clamp-2 mb-2">{task.description}</p>
+                                        )}
+
+                                        {/* Tags row */}
+                                        <div className="flex items-center gap-1.5 flex-wrap mb-3">
+                                            <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold border ${getDifficultyColor(task.difficulty)}`}>
+                                                {task.difficulty}
+                                            </span>
+                                            <span className="flex items-center gap-1 text-gray-500 bg-gray-50 px-1.5 py-0.5 rounded text-[10px] font-medium border border-gray-100">
+                                                {getModuleIcon(moduleInfo.category)}
+                                                <span className="hidden sm:inline">{moduleInfo.title}</span>
+                                                <span className="sm:hidden">{moduleInfo.category.toUpperCase()}</span>
+                                            </span>
+                                            <span className="flex items-center gap-1 text-gray-400 text-[10px]">
+                                                <Clock className="w-3 h-3" />~{task.timePerTaskSec}s
+                                            </span>
+                                            <span className="flex items-center gap-1 text-gray-400 text-[10px]">
+                                                <Target className="w-3 h-3" />{task.availableTasks} left
+                                            </span>
+                                        </div>
+
+                                        {/* Bottom row: reward + actions */}
+                                        <div className="flex items-center justify-between gap-2">
+                                            {/* Reward */}
+                                            <div>
+                                                <span className="text-lg md:text-xl font-bold text-gray-900">
+                                                    <span className="text-xs text-gray-400 font-medium">$</span>
+                                                    {task.rewardPerTask.toFixed(2)}
+                                                </span>
+                                                <span className="text-[10px] text-gray-400 uppercase ml-1">USDC</span>
                                             </div>
 
+                                            {/* Action buttons */}
                                             <div className="flex items-center gap-2">
                                                 <button
-                                                    className={`h-9 w-9 border border-gray-200 text-gray-600 rounded-lg hover:bg-gray-50 transition flex items-center justify-center ${isExpanded ? 'bg-blue-50 border-blue-200 text-blue-600' : 'bg-white'}`}
+                                                    className={`h-8 w-8 border border-gray-200 text-gray-600 rounded-lg hover:bg-gray-50 transition flex items-center justify-center ${isExpanded ? 'bg-blue-50 border-blue-200 text-blue-600' : 'bg-white'}`}
+                                                    onClick={(e) => { e.stopPropagation(); setExpandedTaskId(isExpanded ? null : task.id); }}
                                                     title="Details"
-                                                    onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        setExpandedTaskId(isExpanded ? null : task.id);
-                                                    }}
                                                 >
-                                                    <Info className="w-4 h-4" />
+                                                    <Info className="w-3.5 h-3.5" />
                                                 </button>
                                                 <button
-                                                    onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        setSelectedTask(task);
-                                                        updateUrl(task.id);
-                                                    }}
-                                                    className="bg-black text-white px-5 py-2 rounded-lg text-sm font-semibold hover:bg-gray-800 transition shadow-sm flex items-center justify-center gap-2 h-9"
+                                                    onClick={(e) => { e.stopPropagation(); setSelectedTask(task); updateUrl(task.id); }}
+                                                    className="bg-black text-white px-4 py-2 rounded-lg text-xs md:text-sm font-semibold hover:bg-gray-800 transition shadow-sm flex items-center gap-1.5 h-8"
                                                 >
-                                                    <Zap className="w-3.5 h-3.5" />
-                                                    Start
+                                                    <Zap className="w-3 h-3" /> Start
                                                 </button>
                                             </div>
                                         </div>
                                     </div>
                                 </div>
 
-                                {/* Expanded Details Section */}
+                                {/* Expanded details */}
                                 {isExpanded && (
                                     <div className="bg-gray-50 px-4 py-3 border-t border-gray-100 ml-1">
-                                        <div className="flex gap-4">
-                                            <div className="flex-1">
-                                                <p className="text-xs font-bold text-gray-500 uppercase mb-1">Full Description</p>
-                                                <p className="text-sm text-gray-700 leading-relaxed mb-3">{task.description}</p>
-
-                                                <div className="flex gap-2 flex-wrap">
-                                                    {task.tags?.map((tag: string, i: number) => (
-                                                        <span key={i} className="px-2 py-1 bg-white border border-gray-200 rounded text-[10px] text-gray-500 font-mono">
-                                                            #{tag}
-                                                        </span>
-                                                    ))}
-                                                </div>
-                                            </div>
+                                        <p className="text-xs font-bold text-gray-500 uppercase mb-1">Full Description</p>
+                                        <p className="text-xs md:text-sm text-gray-700 leading-relaxed mb-3">{task.description}</p>
+                                        <div className="flex gap-2 flex-wrap">
+                                            {task.tags?.map((tag: string, i: number) => (
+                                                <span key={i} className="px-2 py-1 bg-white border border-gray-200 rounded text-[10px] text-gray-500 font-mono">
+                                                    #{tag}
+                                                </span>
+                                            ))}
                                         </div>
                                     </div>
                                 )}
