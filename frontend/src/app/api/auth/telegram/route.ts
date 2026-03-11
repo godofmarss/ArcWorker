@@ -1,53 +1,109 @@
 import { NextResponse } from 'next/server';
 import { getUserByEmailOrUsername, createUser } from '@/utils/db';
-import { getOrCreateCircleUser, createCircleSession, findFundedWallet } from '@/arcworker-sdk/wallet/server';
+import axios from 'axios';
+import crypto from 'crypto';
+
+// Developer-controlled wallet client
+const devClient = axios.create({
+    baseURL: 'https://api.circle.com/v1/w3s',
+    headers: { 'Content-Type': 'application/json' },
+});
+
+devClient.interceptors.request.use((config) => {
+    const key = (process.env.CIRCLE_API_KEY || '').replace(/['"]+/g, '').trim();
+    config.headers['Authorization'] = `Bearer ${key}`;
+    return config;
+});
+
+/**
+ * Generate entity secret ciphertext required by Circle dev wallet API.
+ */
+async function generateEntitySecretCiphertext(entitySecret: string): Promise<string> {
+    // Fetch Circle's public key for encryption
+    const pubKeyRes = await devClient.get('/config/entity/publicKey');
+    const publicKeyPem = pubKeyRes.data.data.publicKey;
+
+    const entitySecretBytes = Buffer.from(entitySecret, 'hex');
+
+    const encrypted = crypto.publicEncrypt(
+        {
+            key: publicKeyPem,
+            padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
+            oaepHash: 'sha256',
+        },
+        entitySecretBytes
+    );
+
+    return encrypted.toString('base64');
+}
+
+/**
+ * Create a developer-controlled wallet for a Telegram user.
+ * No PIN, no security questions needed.
+ */
+async function createDevWallet(telegramId: string): Promise<{ walletId: string; address: string } | null> {
+    try {
+        const entitySecret = (process.env.CIRCLE_ENTITY_SECRET || '').replace(/['"]+/g, '').trim();
+
+        if (!entitySecret) {
+            console.error('[TelegramAuth] CIRCLE_ENTITY_SECRET is not set!');
+            return null;
+        }
+
+        const ciphertext = await generateEntitySecretCiphertext(entitySecret);
+
+        // Step 1: Create a wallet set for this user
+        const wsRes = await devClient.post('/developer/walletSets', {
+            idempotencyKey: crypto.randomUUID(),
+            entitySecretCiphertext: ciphertext,
+            name: `tg_${telegramId}`,
+        });
+        const walletSetId = wsRes.data.data.walletSet.id;
+        console.log(`[TelegramAuth] Created wallet set: ${walletSetId}`);
+
+        // Step 2: Create wallet in the set
+        const ciphertext2 = await generateEntitySecretCiphertext(entitySecret);
+        const walletRes = await devClient.post('/developer/wallets', {
+            idempotencyKey: crypto.randomUUID(),
+            entitySecretCiphertext: ciphertext2,
+            walletSetId,
+            blockchains: ['ARC-TESTNET'],
+            count: 1,
+            accountType: 'SCA',
+            metadata: [{ name: `tg_${telegramId}`, refId: `telegram_${telegramId}` }],
+        });
+
+        const wallet = walletRes.data.data.wallets?.[0];
+        if (!wallet) return null;
+
+        console.log(`[TelegramAuth] Dev wallet created: ${wallet.address}`);
+        return { walletId: wallet.id, address: wallet.address };
+
+    } catch (e: any) {
+        console.error('[TelegramAuth] createDevWallet failed:', e.response?.data || e.message);
+        return null;
+    }
+}
 
 export async function POST(request: Request) {
     try {
         const body = await request.json();
-        const { telegramId, telegramUsername, telegramName, initData } = body;
+        const { telegramId, telegramUsername, telegramName } = body;
 
         if (!telegramId) {
             return NextResponse.json({ error: 'Missing Telegram ID' }, { status: 400 });
         }
 
-        // Use telegram ID as the unique identifier
         const syntheticEmail = `tg_${telegramId}@telegram.arcworker`;
         const username = telegramUsername || `tg_${telegramId}`;
         const displayName = telegramName || username;
 
         // Check if user already exists
-        let existingUser = await getUserByEmailOrUsername(syntheticEmail)
-            .catch(() => null);
-
-        if (!existingUser) {
-            // Try by username too
-            existingUser = await getUserByEmailOrUsername(username).catch(() => null);
-        }
+        const existingUser = await getUserByEmailOrUsername(syntheticEmail).catch(() => null)
+            || await getUserByEmailOrUsername(username).catch(() => null);
 
         if (existingUser) {
-            // --- EXISTING USER: LOGIN ---
-            console.log(`[Telegram Auth] Existing user login: ${username} (${existingUser.role})`);
-
-            // Get or create Circle session
-            const userId = existingUser.user_id || existingUser.userId || syntheticEmail;
-            let circleSession = null;
-            let walletAddress = existingUser.wallet_address || existingUser.walletAddress;
-
-            try {
-                const circleUser = await getOrCreateCircleUser(userId);
-                const session = await createCircleSession(circleUser.userId);
-                circleSession = session;
-
-                // Try to get wallet address if not stored
-                if (!walletAddress) {
-                    const walletResult = await findFundedWallet(session.userToken, '0').catch(() => null);
-                    walletAddress = walletResult?.wallet?.address || walletAddress;
-                }
-            } catch (e) {
-                console.warn('[Telegram Auth] Circle session error (non-fatal):', e);
-            }
-
+            console.log(`[Telegram Auth] Existing user login: ${username}`);
             return NextResponse.json({
                 success: true,
                 isNewUser: false,
@@ -55,55 +111,35 @@ export async function POST(request: Request) {
                     username: existingUser.username,
                     name: displayName,
                     role: existingUser.role || 'worker',
-                    walletType: 'circle',
+                    walletType: 'dev_circle',
                     email: syntheticEmail,
-                    id: existingUser.user_id || existingUser.userId || syntheticEmail,
-                    userId: existingUser.user_id || existingUser.userId || syntheticEmail,
-                    walletAddress,
+                    id: syntheticEmail,
+                    userId: syntheticEmail,
+                    walletAddress: existingUser.wallet_address || existingUser.walletAddress,
                     telegramId,
                     telegramUsername: username,
                 },
-                circleSession: circleSession ? {
-                    userToken: circleSession.userToken,
-                    encryptionKey: circleSession.encryptionKey,
-                } : null,
-                walletAddress,
+                walletAddress: existingUser.wallet_address || existingUser.walletAddress,
             });
         }
 
         // --- NEW USER: REGISTER ---
-        console.log(`[Telegram Auth] New user registration: ${username}`);
+        console.log(`[Telegram Auth] New Telegram user: ${username}`);
 
-        // Create Circle wallet
-        let circleUserId = syntheticEmail;
-        let circleSession = null;
-        let walletAddress = null;
+        const walletResult = await createDevWallet(telegramId);
+        const walletAddress = walletResult?.address || '';
 
-        try {
-            const circleUser = await getOrCreateCircleUser(syntheticEmail);
-            circleUserId = circleUser.userId;
-            const session = await createCircleSession(circleUserId);
-            circleSession = session;
-
-            // Try to get wallet address
-            const walletResult = await findFundedWallet(session.userToken, '0').catch(() => null);
-            walletAddress = walletResult?.wallet?.address || null;
-        } catch (e) {
-            console.warn('[Telegram Auth] Circle wallet creation error (non-fatal):', e);
-        }
-
-        // Save user to DB
         await createUser({
             username,
-            password: `tg_${telegramId}_${Date.now()}`, // non-usable password
+            password: `tg_${telegramId}_${Date.now()}`,
             email: syntheticEmail,
-            walletAddress: walletAddress || '',
-            role: 'worker', // Telegram users are always workers
-            walletType: 'circle',
-            userId: circleUserId,
+            walletAddress,
+            role: 'worker',
+            walletType: 'dev_circle',
+            userId: syntheticEmail,
         });
 
-        console.log(`[Telegram Auth] New user registered: ${username} | Circle: ${circleUserId}`);
+        console.log(`[Telegram Auth] Registered: ${username} | Wallet: ${walletAddress}`);
 
         return NextResponse.json({
             success: true,
@@ -112,18 +148,14 @@ export async function POST(request: Request) {
                 username,
                 name: displayName,
                 role: 'worker',
-                walletType: 'circle',
+                walletType: 'dev_circle',
                 email: syntheticEmail,
-                id: circleUserId,
-                userId: circleUserId,
+                id: syntheticEmail,
+                userId: syntheticEmail,
                 walletAddress,
                 telegramId,
                 telegramUsername: username,
             },
-            circleSession: circleSession ? {
-                userToken: circleSession.userToken,
-                encryptionKey: circleSession.encryptionKey,
-            } : null,
             walletAddress,
         });
 
