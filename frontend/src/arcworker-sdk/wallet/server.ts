@@ -296,6 +296,7 @@ export async function createCircleTransfer(userToken: string, walletId: string, 
         destinationAddress,
         amounts: [amount.toString()],
         feeLevel: 'HIGH',
+        blockchain: 'ARC-TESTNET',
     };
 
     if (tokenId) {
