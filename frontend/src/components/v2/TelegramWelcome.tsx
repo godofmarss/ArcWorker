@@ -1,7 +1,6 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { Loader2 } from 'lucide-react';
 
 interface TelegramUser {
     id: number;
@@ -17,11 +16,14 @@ interface TelegramWelcomeProps {
 
 export const TelegramWelcome: React.FC<TelegramWelcomeProps> = ({ onComplete }) => {
     const [tgUser, setTgUser] = useState<TelegramUser | null>(null);
-    const [step, setStep] = useState<'welcome' | 'loading' | 'error'>('welcome');
+    const [step, setStep] = useState<'welcome' | 'loading' | 'link_choice' | 'link_email' | 'link_otp' | 'error'>('welcome');
     const [errorMsg, setErrorMsg] = useState('');
+    const [email, setEmail] = useState('');
+    const [otp, setOtp] = useState('');
+    const [isSendingOtp, setIsSendingOtp] = useState(false);
+    const [pendingTgData, setPendingTgData] = useState<any>(null);
 
     useEffect(() => {
-        // Get Telegram user data from SDK
         const tg = (window as any).Telegram?.WebApp;
         if (tg) {
             tg.ready();
@@ -29,7 +31,6 @@ export const TelegramWelcome: React.FC<TelegramWelcomeProps> = ({ onComplete }) 
             const user = tg.initDataUnsafe?.user;
             if (user) {
                 setTgUser(user);
-                // If cached account belongs to a different Telegram user, clear it
                 try {
                     const cached = localStorage.getItem('arc_user');
                     if (cached) {
@@ -77,26 +78,93 @@ export const TelegramWelcome: React.FC<TelegramWelcomeProps> = ({ onComplete }) 
                 throw new Error(data.error || 'Authentication failed');
             }
 
-            // Save session to localStorage (same pattern as email login)
-            localStorage.setItem('arc_user', JSON.stringify({ 
-    ...data.user, 
-    telegramId: tgUser.id.toString() 
-}));
-            if (data.circleSession?.userToken) {
-                localStorage.setItem('arc_session_token', data.circleSession.userToken);
-            }
-            if (data.circleSession?.encryptionKey) {
-                localStorage.setItem('arc_encryption_key', data.circleSession.encryptionKey);
-            }
-            if (data.walletAddress) {
-                localStorage.setItem('arc_wallet_address', data.walletAddress);
+            if (data.promptLink) {
+                setPendingTgData(data);
+                setStep('link_choice');
+                return;
             }
 
-            onComplete(data.user);
+            completeLogin(data);
 
         } catch (e: any) {
             console.error('[TelegramWelcome] Auth error:', e);
             setErrorMsg(e.message || 'Something went wrong. Please try again.');
+            setStep('error');
+        }
+    };
+
+    const completeLogin = (data: any) => {
+        localStorage.setItem('arc_user', JSON.stringify({
+            ...data.user,
+            telegramId: tgUser?.id.toString()
+        }));
+        if (data.circleSession?.userToken) localStorage.setItem('arc_session_token', data.circleSession.userToken);
+        if (data.circleSession?.encryptionKey) localStorage.setItem('arc_encryption_key', data.circleSession.encryptionKey);
+        if (data.walletAddress) localStorage.setItem('arc_wallet_address', data.walletAddress);
+        onComplete(data.user);
+    };
+
+    const handleCreateNew = async () => {
+        if (!tgUser) return;
+        setStep('loading');
+        try {
+            const res = await fetch('/api/auth/telegram', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    telegramId: tgUser.id.toString(),
+                    telegramUsername: tgUser.username || `user_${tgUser.id}`,
+                    telegramName: [tgUser.first_name, tgUser.last_name].filter(Boolean).join(' '),
+                }),
+            });
+            const data = await res.json();
+            if (!res.ok || !data.success) throw new Error(data.error || 'Registration failed');
+            completeLogin(data);
+        } catch (e: any) {
+            setErrorMsg(e.message || 'Registration failed. Please try again.');
+            setStep('error');
+        }
+    };
+
+    const handleSendOtp = async () => {
+        if (!email) return;
+        setIsSendingOtp(true);
+        try {
+            const res = await fetch('/api/auth/send-otp', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email }),
+            });
+            const data = await res.json();
+            if (!res.ok || !data.success) throw new Error(data.error || 'Failed to send OTP');
+            setStep('link_otp');
+        } catch (e: any) {
+            setErrorMsg(e.message || 'Failed to send OTP. Check your email and try again.');
+            setStep('error');
+        } finally {
+            setIsSendingOtp(false);
+        }
+    };
+
+    const handleVerifyOtp = async () => {
+        if (!otp || !email || !tgUser) return;
+        setStep('loading');
+        try {
+            const res = await fetch('/api/auth/verify-otp', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    email,
+                    otp,
+                    telegramId: tgUser.id.toString(),
+                    telegramUsername: tgUser.username || `user_${tgUser.id}`,
+                }),
+            });
+            const data = await res.json();
+            if (!res.ok || !data.success) throw new Error(data.error || 'Verification failed');
+            completeLogin(data);
+        } catch (e: any) {
+            setErrorMsg(e.message || 'Verification failed. Please try again.');
             setStep('error');
         }
     };
@@ -107,12 +175,9 @@ export const TelegramWelcome: React.FC<TelegramWelcomeProps> = ({ onComplete }) 
 
     return (
         <div className="min-h-screen bg-[#0a0a0f] flex flex-col items-center justify-between px-6 py-12 relative overflow-hidden">
-
-            {/* Background glow effects */}
             <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[600px] h-[600px] rounded-full bg-blue-600/10 blur-[120px] pointer-events-none" />
             <div className="absolute bottom-0 right-0 w-[400px] h-[400px] rounded-full bg-indigo-600/10 blur-[100px] pointer-events-none" />
 
-            {/* Top logo */}
             <div className="flex flex-col items-center gap-3 z-10 mt-8">
                 <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-blue-500/30">
                     <svg width="32" height="32" viewBox="0 0 32 32" fill="none">
@@ -123,53 +188,33 @@ export const TelegramWelcome: React.FC<TelegramWelcomeProps> = ({ onComplete }) 
                 <span className="text-white/40 text-xs font-mono tracking-widest uppercase">ArcWorker</span>
             </div>
 
-            {/* Main content */}
             <div className="flex flex-col items-center gap-8 z-10 w-full max-w-sm">
+
                 {step === 'welcome' && (
                     <>
                         <div className="text-center space-y-3">
-                            <h1 className="text-3xl font-bold text-white leading-tight">
-                                Hey, {displayName} 👋
-                            </h1>
+                            <h1 className="text-3xl font-bold text-white leading-tight">Hey, {displayName} 👋</h1>
                             <p className="text-white/50 text-base leading-relaxed">
                                 Complete micro-tasks and earn <span className="text-blue-400 font-semibold">USDC</span> instantly — paid to your wallet the moment your work is verified.
                             </p>
                         </div>
-
-                        {/* Feature pills */}
                         <div className="flex flex-wrap gap-2 justify-center">
                             {['Instant USDC pay', 'AI-powered tasks', 'No KYC needed', 'Withdraw anytime'].map((f) => (
-                                <span key={f} className="px-3 py-1.5 rounded-full border border-white/10 bg-white/5 text-white/60 text-xs font-medium">
-                                    {f}
-                                </span>
+                                <span key={f} className="px-3 py-1.5 rounded-full border border-white/10 bg-white/5 text-white/60 text-xs font-medium">{f}</span>
                             ))}
                         </div>
-
-                        {/* Stats row */}
                         <div className="grid grid-cols-3 gap-3 w-full">
-                            {[
-                                { label: 'Avg. Reward', value: '$0.15' },
-                                { label: 'Task Time', value: '~2 min' },
-                                { label: 'Payout', value: 'Instant' },
-                            ].map((s) => (
+                            {[{ label: 'Avg. Reward', value: '$0.15' }, { label: 'Task Time', value: '~2 min' }, { label: 'Payout', value: 'Instant' }].map((s) => (
                                 <div key={s.label} className="bg-white/5 border border-white/10 rounded-2xl p-3 text-center">
                                     <p className="text-white font-bold text-lg">{s.value}</p>
                                     <p className="text-white/40 text-[11px] mt-0.5">{s.label}</p>
                                 </div>
                             ))}
                         </div>
-
-                        {/* CTA Button */}
-                        <button
-                            onClick={handleGetStarted}
-                            className="w-full py-4 rounded-2xl bg-gradient-to-r from-blue-500 to-indigo-600 text-white font-bold text-base shadow-lg shadow-blue-500/30 active:scale-95 transition-transform"
-                        >
+                        <button onClick={handleGetStarted} className="w-full py-4 rounded-2xl bg-gradient-to-r from-blue-500 to-indigo-600 text-white font-bold text-base shadow-lg shadow-blue-500/30 active:scale-95 transition-transform">
                             Get Started →
                         </button>
-
-                        <p className="text-white/20 text-xs text-center">
-                            By continuing, you agree to ArcWorker's terms. A Circle wallet will be created for you automatically.
-                        </p>
+                        <p className="text-white/20 text-xs text-center">By continuing, you agree to ArcWorker's terms. A Circle wallet will be created for you automatically.</p>
                     </>
                 )}
 
@@ -183,6 +228,67 @@ export const TelegramWelcome: React.FC<TelegramWelcomeProps> = ({ onComplete }) 
                     </div>
                 )}
 
+                {step === 'link_choice' && (
+                    <div className="flex flex-col items-center gap-6 w-full text-center">
+                        <div className="space-y-2">
+                            <h2 className="text-2xl font-bold text-white">Welcome! 🎉</h2>
+                            <p className="text-white/50 text-sm leading-relaxed">Do you already have an ArcWorker account, or are you joining for the first time?</p>
+                        </div>
+                        <div className="flex flex-col gap-3 w-full">
+                            <button onClick={() => setStep('link_email')} className="w-full py-4 rounded-2xl bg-gradient-to-r from-blue-500 to-indigo-600 text-white font-bold text-base shadow-lg shadow-blue-500/30 active:scale-95 transition-transform">
+                                🔗 I have an account — Link it
+                            </button>
+                            <button onClick={handleCreateNew} className="w-full py-4 rounded-2xl border border-white/10 bg-white/5 text-white font-bold text-base active:scale-95 transition-transform">
+                                ✨ I'm new — Create account
+                            </button>
+                        </div>
+                    </div>
+                )}
+
+                {step === 'link_email' && (
+                    <div className="flex flex-col items-center gap-6 w-full">
+                        <div className="text-center space-y-2">
+                            <h2 className="text-2xl font-bold text-white">Link Your Account</h2>
+                            <p className="text-white/50 text-sm">Enter your ArcWorker email. We'll send a 6-digit verification code.</p>
+                        </div>
+                        <div className="w-full space-y-3">
+                            <input
+                                type="email"
+                                value={email}
+                                onChange={(e) => setEmail(e.target.value)}
+                                placeholder="your@email.com"
+                                className="w-full px-4 py-4 rounded-2xl bg-white/5 border border-white/10 text-white placeholder-white/30 text-base focus:outline-none focus:border-blue-500"
+                            />
+                            <button onClick={handleSendOtp} disabled={!email || isSendingOtp} className="w-full py-4 rounded-2xl bg-gradient-to-r from-blue-500 to-indigo-600 text-white font-bold text-base shadow-lg shadow-blue-500/30 active:scale-95 transition-transform disabled:opacity-50">
+                                {isSendingOtp ? 'Sending...' : 'Send Verification Code →'}
+                            </button>
+                            <button onClick={() => setStep('link_choice')} className="w-full py-2 text-white/30 text-sm">← Back</button>
+                        </div>
+                    </div>
+                )}
+
+                {step === 'link_otp' && (
+                    <div className="flex flex-col items-center gap-6 w-full">
+                        <div className="text-center space-y-2">
+                            <h2 className="text-2xl font-bold text-white">Check Your Email</h2>
+                            <p className="text-white/50 text-sm">Enter the 6-digit code sent to <span className="text-blue-400">{email}</span></p>
+                        </div>
+                        <div className="w-full space-y-3">
+                            <input
+                                type="number"
+                                value={otp}
+                                onChange={(e) => setOtp(e.target.value)}
+                                placeholder="000000"
+                                className="w-full px-4 py-4 rounded-2xl bg-white/5 border border-white/10 text-white placeholder-white/30 text-2xl text-center font-bold tracking-widest focus:outline-none focus:border-blue-500"
+                            />
+                            <button onClick={handleVerifyOtp} disabled={otp.length < 6} className="w-full py-4 rounded-2xl bg-gradient-to-r from-blue-500 to-indigo-600 text-white font-bold text-base shadow-lg shadow-blue-500/30 active:scale-95 transition-transform disabled:opacity-50">
+                                Verify & Link Account →
+                            </button>
+                            <button onClick={() => { setOtp(''); setStep('link_email'); }} className="w-full py-2 text-white/30 text-sm">← Resend code</button>
+                        </div>
+                    </div>
+                )}
+
                 {step === 'error' && (
                     <div className="flex flex-col items-center gap-6 py-8 text-center">
                         <div className="w-14 h-14 rounded-full bg-red-500/10 border border-red-500/30 flex items-center justify-center">
@@ -192,17 +298,11 @@ export const TelegramWelcome: React.FC<TelegramWelcomeProps> = ({ onComplete }) 
                             <p className="text-white font-semibold">Something went wrong</p>
                             <p className="text-white/40 text-sm">{errorMsg}</p>
                         </div>
-                        <button
-                            onClick={() => setStep('welcome')}
-                            className="px-6 py-3 rounded-xl bg-white/10 text-white text-sm font-medium"
-                        >
-                            Try Again
-                        </button>
+                        <button onClick={() => setStep('welcome')} className="px-6 py-3 rounded-xl bg-white/10 text-white text-sm font-medium">Try Again</button>
                     </div>
                 )}
             </div>
 
-            {/* Bottom spacer */}
             <div className="h-4 z-10" />
         </div>
     );
