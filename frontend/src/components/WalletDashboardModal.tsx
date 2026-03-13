@@ -367,18 +367,27 @@ const { data: wagmiBalanceData, isLoading: isWagmiBalanceLoading, refetch: refet
         const user = savedUser ? JSON.parse(savedUser) : {};
 
         if (user.walletType === 'dev_circle') {
-            // Server-side transfer for Telegram wallets
-            const res = await axios.post('/api/circle/transfer', {
-                fromAddress: address,
-                toAddress: target,
-                amount,
-                isDev: true,
-            });
-            const data = res.data;
-            if (data.error) throw new Error(data.error);
-            setIsCircleSuccess(true);
-            addToContacts(target, recipient.startsWith('@') ? recipient.substring(1) : undefined);
-            setTimeout(() => refetchWagmiBalance(), 3000);
+    const res = await axios.post('/api/circle/transfer', {
+        fromAddress: address,
+        toAddress: target,
+        amount,
+        isDev: true,
+    });
+    const data = res.data;
+    if (data.error) throw new Error(data.error);
+    // Save to social feed
+    if (memo) {
+        await axios.post('/api/social/payment', {
+            fromAddress: address,
+            toAddress: target,
+            amount,
+            symbol: 'USDC',
+            memo,
+        }).catch(() => {});
+    }
+    setIsCircleSuccess(true);
+    addToContacts(target, recipient.startsWith('@') ? recipient.substring(1) : undefined);
+    setTimeout(() => refetchWagmiBalance(), 3000);
         } else {
             await sendCircleTransfer(target, amount, 'USDC', memo);
             setIsCircleSuccess(true);
@@ -725,8 +734,8 @@ const { data: wagmiBalanceData, isLoading: isWagmiBalanceLoading, refetch: refet
                                 )}
                             </div>
 
-                            <button onClick={() => refetchWagmiBalance()} className="mt-8 text-xs font-bold text-slate-400 hover:text-blue-600">
-                                {isCircleBalanceLoading || isWagmiBalanceLoading ? '↻ Updating...' : '↻ Refresh Balance'}
+                            <button onClick={async () => { await refetchWagmiBalance(); }} className="mt-8 text-xs font-bold text-slate-400 hover:text-blue-600">
+                                {isWagmiBalanceLoading ? '↻ Updating...' : '↻ Refresh Balance'}
                             </button>
                         </div>
                     )}
