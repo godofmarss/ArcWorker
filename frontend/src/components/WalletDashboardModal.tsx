@@ -22,6 +22,28 @@ export default function WalletDashboardModal({ isOpen, onClose, externalSavingsB
     const { connectors, connect } = useConnect();
     const publicClient = usePublicClient();
     const { getBalance: getCircleBalance, sendTransfer: sendCircleTransfer, setupArcWorkerWallet, isLoading: isCircleLoading, error: circleError } = useArcWorkerWallet();
+    // Auto-clear stale session if wallet loading is stuck
+useEffect(() => {
+    if (!isCircleLoading) return;
+    const timeout = setTimeout(() => {
+        const savedUser = localStorage.getItem('arc_user');
+        if (savedUser) {
+            try {
+                const user = JSON.parse(savedUser);
+                // Only clear for dev_circle (Telegram) wallets — they don't use Circle SDK
+                if (user.walletType === 'dev_circle') {
+                    console.log('[WalletModal] Stale dev_circle session detected, clearing...');
+                    localStorage.removeItem('arc_user');
+                    localStorage.removeItem('arc_session_token');
+                    localStorage.removeItem('arc_encryption_key');
+                    localStorage.removeItem('arc_wallet_address');
+                    window.location.reload();
+                }
+            } catch (e) {}
+        }
+    }, 5000); // 5 seconds timeout
+    return () => clearTimeout(timeout);
+}, [isCircleLoading]);
 
     const [activeTab, setActiveTab] = useState<'ASSETS' | 'SEND' | 'RECEIVE' | 'ACTIVITY'>('ASSETS');
     const [recipient, setRecipient] = useState('');
