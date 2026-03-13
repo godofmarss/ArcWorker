@@ -110,11 +110,12 @@ export async function POST(request: Request) {
         }
 
         const challengeId = await createCircleTransfer(
-            session.userToken,
-            wallet.id,
-            toAddress,
-            amount
-        );
+    session.userToken,
+    wallet.id,
+    toAddress,
+    amount,
+    wallet.tokenId || undefined
+);
 
         return NextResponse.json({
             success: true,
