@@ -26,18 +26,25 @@ export default function DesignPreview() {
     const [telegramReady, setTelegramReady] = useState(false);
 
     useEffect(() => {
-        const stored = localStorage.getItem('arc_user');
-        if (stored) {
+    const tgDetected = isTelegramMiniApp();
+    setIsTelegram(tgDetected);
+    setTelegramReady(true);
+
+    const stored = localStorage.getItem('arc_user');
+    if (stored) {
+        try {
             const parsedUser = JSON.parse(stored);
+            // For Telegram, let TelegramWelcome handle auth
+            if (tgDetected) return;
             setUser(parsedUser);
-            // Already logged in — redirect immediately
             if (parsedUser.role === 'agency') {
                 router.push('/agency/dashboard');
             } else {
                 router.push('/worker/dashboard');
             }
-            return;
-        }
+        } catch (e) {}
+    }
+}, [isConnected]);
 
         // Check if inside Telegram Mini App
         const tgDetected = isTelegramMiniApp();
