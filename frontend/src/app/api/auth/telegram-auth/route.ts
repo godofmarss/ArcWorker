@@ -81,10 +81,10 @@ export async function POST(request: Request) {
 
         // --- CHECK 1: Is this Telegram ID already linked to a web account? ---
         const linkedResult = await sql`
-            SELECT id, username, email, role, wallet_address, wallet_type, telegram_id
-            FROM users 
-            WHERE telegram_id = ${telegramId.toString()}
-        `.catch(() => ({ rows: [] }));
+    SELECT id, username, email, role, wallet_address, wallet_type, telegram_id
+    FROM users 
+    WHERE telegram_id = ${String(telegramId)}
+`.catch(() => ({ rows: [] }));
 
         if (linkedResult.rows.length > 0) {
             const linkedUser = linkedResult.rows[0];
@@ -177,7 +177,7 @@ export async function PUT(request: Request) {
             userId: syntheticEmail,
         });
 
-        await sql`UPDATE users SET telegram_id = ${telegramId.toString()} WHERE email = ${syntheticEmail}`.catch(() => {});
+        await sql`UPDATE users SET telegram_id = ${String(telegramId)} WHERE email = ${syntheticEmail}`.catch(() => {});
 
         console.log(`[Telegram Auth] Registered new user: ${username} | Wallet: ${walletAddress}`);
 
