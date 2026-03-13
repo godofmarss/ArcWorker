@@ -389,11 +389,19 @@ await axios.post('/api/social/payment', {
     addToContacts(target, recipient.startsWith('@') ? recipient.substring(1) : undefined);
     setTimeout(() => refetchWagmiBalance(), 3000);
         } else {
-            await sendCircleTransfer(target, amount, 'USDC', memo);
-            setIsCircleSuccess(true);
-            addToContacts(target, recipient.startsWith('@') ? recipient.substring(1) : undefined);
-            fetchCircleBalance();
-        }
+    await sendCircleTransfer(target, amount, 'USDC', memo);
+    // Save to activity feed
+    await axios.post('/api/social/payment', {
+        fromAddress: address,
+        toAddress: target,
+        amount,
+        symbol: 'USDC',
+        memo: memo || `Sent ${amount} USDC`,
+    }).catch(() => {});
+    setIsCircleSuccess(true);
+    addToContacts(target, recipient.startsWith('@') ? recipient.substring(1) : undefined);
+    fetchCircleBalance();
+}
         setMemo('');
             } catch (err) {
                 console.error("Circle Send Error:", err);
