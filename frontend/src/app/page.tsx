@@ -51,12 +51,6 @@ export default function DesignPreview() {
     setTelegramReady(true);
 }, [isConnected]);
 
-        // Check if inside Telegram Mini App
-        const tgDetected = isTelegramMiniApp();
-        setIsTelegram(tgDetected);
-        setTelegramReady(true);
-    }, [isConnected]);
-
     const openAuth = (mode: 'register' | 'login', role?: 'worker' | 'agency') => {
         setAuthMode(mode);
         setPreselectedRole(role);
