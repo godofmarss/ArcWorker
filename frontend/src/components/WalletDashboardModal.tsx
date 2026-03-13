@@ -67,6 +67,8 @@ export default function WalletDashboardModal({ isOpen, onClose, externalSavingsB
     const [savingsAssets, setSavingsAssets] = useState<string>('0.00');
     const [isWithdrawing, setIsWithdrawing] = useState(false);
     const [showAddress, setShowAddress] = useState(false);
+    const [copied, setCopied] = useState(false);
+const [isDevSending, setIsDevSending] = useState(false);
 
     const address = isCircle ? circleAddress : wagmiAddress;
     const isConnected = isCircle ? !!circleAddress : wagmiConnected;
