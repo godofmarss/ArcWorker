@@ -522,7 +522,7 @@ const { data: wagmiBalanceData, isLoading: isWagmiBalanceLoading, refetch: refet
         ? formatUnits(wagmiBalanceData.value, wagmiBalanceData.decimals)
         : '0.00';
 
-    const liquidBalance = isCircle ? Number(circleBalance) : Number(formattedWagmiBalance);
+    const liquidBalance = Number(formattedWagmiBalance);
     const savingsBalance = Number(savingsAssets);
     const totalBalance = liquidBalance + savingsBalance;
     const balanceDisplay = totalBalance.toFixed(2);
