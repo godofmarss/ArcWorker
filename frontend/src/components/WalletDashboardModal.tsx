@@ -876,7 +876,7 @@ await axios.post('/api/social/payment', {
                                                     <div className="mt-2 p-3 bg-slate-50 rounded-xl border border-slate-100">
                                                         <p className="text-sm text-slate-700 font-medium italic">"{m.memo}"</p>
                                                     </div>
-                                                    <p className="text-[10px] text-slate-400 mt-2 font-bold uppercase tracking-tighter">{new Date(m.createdAt).toLocaleString()}</p>
+                                                    <p className="text-[10px] text-slate-400 mt-2 font-bold uppercase tracking-tighter">{m.createdAt ? new Date(m.createdAt).toLocaleString() : new Date().toLocaleString()}</p>
                                                 </div>
                                             </div>
                                         );
