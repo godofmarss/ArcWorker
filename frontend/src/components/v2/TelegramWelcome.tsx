@@ -27,7 +27,23 @@ export const TelegramWelcome: React.FC<TelegramWelcomeProps> = ({ onComplete }) 
             tg.ready();
             tg.expand();
             const user = tg.initDataUnsafe?.user;
-            if (user) setTgUser(user);
+            if (user) {
+                setTgUser(user);
+                // If cached account belongs to a different Telegram user, clear it
+                try {
+                    const cached = localStorage.getItem('arc_user');
+                    if (cached) {
+                        const cachedUser = JSON.parse(cached);
+                        if (cachedUser.telegramId && cachedUser.telegramId !== user.id.toString()) {
+                            console.log('[TelegramWelcome] Different Telegram account detected, clearing cache');
+                            localStorage.removeItem('arc_user');
+                            localStorage.removeItem('arc_session_token');
+                            localStorage.removeItem('arc_encryption_key');
+                            localStorage.removeItem('arc_wallet_address');
+                        }
+                    }
+                } catch (e) {}
+            }
         }
     }, []);
 
@@ -62,7 +78,10 @@ export const TelegramWelcome: React.FC<TelegramWelcomeProps> = ({ onComplete }) 
             }
 
             // Save session to localStorage (same pattern as email login)
-            localStorage.setItem('arc_user', JSON.stringify(data.user));
+            localStorage.setItem('arc_user', JSON.stringify({ 
+    ...data.user, 
+    telegramId: tgUser.id.toString() 
+}));
             if (data.circleSession?.userToken) {
                 localStorage.setItem('arc_session_token', data.circleSession.userToken);
             }
