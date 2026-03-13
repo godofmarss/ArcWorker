@@ -436,11 +436,23 @@ export default function WalletDashboardModal({ isOpen, onClose, externalSavingsB
                     }
                 }
 
-                // Skip registration for dev_circle wallets - they don't use Circle SDK
-                if (user.walletType === 'dev_circle') {
-                    setIsManualRegistering(false);
-                    alert("On-chain name registration is not yet supported for Telegram wallets.");
-                    return;
+                // Dev Circle (Telegram) wallets — server-side registration
+if (user.walletType === 'dev_circle') {
+    const walletAddr = user.walletAddress || user.address;
+    const { data } = await axios.post('/api/circle/contract/register-name', {
+        username,
+        walletAddress: walletAddr,
+        isDev: true,
+    });
+    if (data.success) {
+        alert(`✅ @${username} registered! Transaction submitted on-chain.`);
+        setTimeout(() => { window.location.reload(); }, 3000);
+    } else {
+        throw new Error(data.error || 'Registration failed');
+    }
+    setIsManualRegistering(false);
+    return;
+}
                 }
 
                 const sessionToken = localStorage.getItem('arc_session_token');
