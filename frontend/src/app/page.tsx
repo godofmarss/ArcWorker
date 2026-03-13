@@ -28,22 +28,27 @@ export default function DesignPreview() {
     useEffect(() => {
     const tgDetected = isTelegramMiniApp();
     setIsTelegram(tgDetected);
-    setTelegramReady(true);
 
     const stored = localStorage.getItem('arc_user');
     if (stored) {
         try {
             const parsedUser = JSON.parse(stored);
-            // For Telegram, let TelegramWelcome handle auth
-            if (tgDetected) return;
             setUser(parsedUser);
+            // For Telegram users already logged in, skip welcome screen
+            if (tgDetected) {
+                router.push('/worker/dashboard');
+                return;
+            }
             if (parsedUser.role === 'agency') {
                 router.push('/agency/dashboard');
             } else {
                 router.push('/worker/dashboard');
             }
+            return;
         } catch (e) {}
     }
+
+    setTelegramReady(true);
 }, [isConnected]);
 
         // Check if inside Telegram Mini App
