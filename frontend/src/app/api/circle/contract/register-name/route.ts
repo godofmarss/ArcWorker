@@ -79,13 +79,27 @@ async function devWalletContractCall(
  */
 async function getDevWalletId(walletAddress: string): Promise<string | null> {
     try {
-        const res = await devClient.get('/developer/wallets', {
-            params: { address: walletAddress }
-        });
-        const wallets = res.data.data?.wallets || [];
-        return wallets[0]?.id || null;
+        // List all dev wallets and find by address
+        let pageAfter: string | undefined;
+        do {
+            const res = await devClient.get('/developer/wallets', {
+                params: { pageSize: 50, ...(pageAfter ? { pageAfter } : {}) }
+            });
+            const wallets = res.data.data?.wallets || [];
+            const match = wallets.find((w: any) => 
+                w.address?.toLowerCase() === walletAddress.toLowerCase()
+            );
+            if (match) {
+                console.log(`[Dev Register] Found wallet ID: ${match.id}`);
+                return match.id;
+            }
+            pageAfter = res.data.data?.pageAfter;
+        } while (pageAfter);
+
+        console.error('[Dev Register] Wallet not found in dev wallet list');
+        return null;
     } catch (e: any) {
-        console.error('[Dev Register] Failed to find wallet by address:', e.response?.data || e.message);
+        console.error('[Dev Register] Failed to list wallets:', e.response?.data || e.message);
         return null;
     }
 }
