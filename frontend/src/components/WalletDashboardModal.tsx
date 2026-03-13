@@ -69,6 +69,7 @@ export default function WalletDashboardModal({ isOpen, onClose, externalSavingsB
     const [showAddress, setShowAddress] = useState(false);
     const [copied, setCopied] = useState(false);
 const [isDevSending, setIsDevSending] = useState(false);
+    const [isRefreshing, setIsRefreshing] = useState(false);
 
     const address = isCircle ? circleAddress : wagmiAddress;
     const isConnected = isCircle ? !!circleAddress : wagmiConnected;
@@ -734,8 +735,8 @@ const { data: wagmiBalanceData, isLoading: isWagmiBalanceLoading, refetch: refet
                                 )}
                             </div>
 
-                            <button onClick={async () => { await refetchWagmiBalance(); }} className="mt-8 text-xs font-bold text-slate-400 hover:text-blue-600">
-                                {isWagmiBalanceLoading ? '↻ Updating...' : '↻ Refresh Balance'}
+                            <button onClick={async () => { setIsRefreshing(true); await refetchWagmiBalance(); setTimeout(() => setIsRefreshing(false), 1500); }} className="mt-8 text-xs font-bold text-slate-400 hover:text-blue-600">
+                                {isRefreshing || isWagmiBalanceLoading ? '↻ Updating...' : '↻ Refresh Balance'}
                             </button>
                         </div>
                     )}
