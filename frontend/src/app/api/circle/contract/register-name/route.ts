@@ -82,9 +82,9 @@ async function getDevWalletId(walletAddress: string): Promise<string | null> {
         // List all dev wallets and find by address
         let pageAfter: string | undefined;
         do {
-            const res = await devClient.get('/developer/wallets', {
-                params: { pageSize: 50, ...(pageAfter ? { pageAfter } : {}) }
-            });
+            const res = await devClient.get('/wallets', {
+    params: { pageSize: 50, ...(pageAfter ? { pageAfter } : {}) }
+});
             const wallets = res.data.data?.wallets || [];
             const match = wallets.find((w: any) => 
                 w.address?.toLowerCase() === walletAddress.toLowerCase()
