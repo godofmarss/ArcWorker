@@ -857,9 +857,9 @@ await axios.post('/api/social/payment', {
                             ) : (
                                 <div className="space-y-4">
                                     {socialMemos.map((m, i) => {
-                                        const isOutgoing = m.fromAddress?.toLowerCase() === address?.toLowerCase();
-                                        const targetAddr = m.toAddress || '';
-                                        const senderAddr = m.fromAddress || '';
+                                        const isOutgoing = (m.from_address || m.fromAddress)?.toLowerCase() === address?.toLowerCase();
+                                        const targetAddr = m.to_address || m.toAddress || '';
+                                        const senderAddr = m.from_address || m.fromAddress || '';
                                         const targetName = socialNameMap[targetAddr.toLowerCase()];
                                         const senderName = socialNameMap[senderAddr.toLowerCase()];
                                         return (
