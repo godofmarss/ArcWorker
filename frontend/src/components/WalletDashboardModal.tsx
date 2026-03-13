@@ -377,15 +377,14 @@ const { data: wagmiBalanceData, isLoading: isWagmiBalanceLoading, refetch: refet
     const data = res.data;
     if (data.error) throw new Error(data.error);
     // Save to social feed
-    if (memo) {
-        await axios.post('/api/social/payment', {
-            fromAddress: address,
-            toAddress: target,
-            amount,
-            symbol: 'USDC',
-            memo,
-        }).catch(() => {});
-    }
+    // Save to social feed (always, even without memo)
+await axios.post('/api/social/payment', {
+    fromAddress: address,
+    toAddress: target,
+    amount,
+    symbol: 'USDC',
+    memo: memo || `Sent ${amount} USDC`,
+}).catch(() => {});
     setIsCircleSuccess(true);
     addToContacts(target, recipient.startsWith('@') ? recipient.substring(1) : undefined);
     setTimeout(() => refetchWagmiBalance(), 3000);
