@@ -10,7 +10,7 @@ const devClient = axios.create({
 });
 
 devClient.interceptors.request.use((config) => {
-    const key = (process.env.CIRCLE_API_KEY || '').replace(/['"]+/g, '').trim();
+    const key = (process.env.CIRCLE_TELEGRAM_API_KEY || process.env.CIRCLE_API_KEY || '').replace(/['"]+/g, '').trim();
     config.headers['Authorization'] = `Bearer ${key}`;
     return config;
 });
