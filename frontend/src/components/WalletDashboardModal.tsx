@@ -82,10 +82,12 @@ export default function WalletDashboardModal({ isOpen, onClose, externalSavingsB
         }
     }, []);
 
-    const { data: wagmiBalanceData, isLoading: isWagmiBalanceLoading, refetch: refetchWagmiBalance } = useBalance({
-        address: wagmiAddress,
-        query: { enabled: !isCircle && !!wagmiAddress }
-    });
+    const devCircleAddress = isCircle && circleAddress ? circleAddress as `0x${string}` : undefined;
+
+const { data: wagmiBalanceData, isLoading: isWagmiBalanceLoading, refetch: refetchWagmiBalance } = useBalance({
+    address: devCircleAddress || wagmiAddress,
+    query: { enabled: !!devCircleAddress || (!isCircle && !!wagmiAddress) }
+});
 
     const { sendTransaction: wagmiSend, data: hash, isPending: isWagmiPending, error: wagmiSendError, reset: resetWagmiSend } = useSendTransaction();
     const { isLoading: isWagmiConfirming, isSuccess: isWagmiSuccess } = useWaitForTransactionReceipt({ hash });
