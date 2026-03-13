@@ -11,8 +11,11 @@ import { Eye, EyeOff, Copy } from 'lucide-react';
 interface WalletDashboardModalProps {
     isOpen: boolean;
     onClose: () => void;
-    externalSavingsBalance?: string; // Optional prop to sync with dashboard
+    externalSavingsBalance?: string;
 }
+
+// Helper to check if user is using any Circle wallet type
+const isCircleWallet = (walletType: string) => walletType === 'circle' || walletType === 'dev_circle';
 
 export default function WalletDashboardModal({ isOpen, onClose, externalSavingsBalance }: WalletDashboardModalProps) {
     const { address: wagmiAddress, isConnected: wagmiConnected, status } = useAccount();
@@ -28,15 +31,17 @@ export default function WalletDashboardModal({ isOpen, onClose, externalSavingsB
     const [socialMemos, setSocialMemos] = useState<any[]>([]);
     const [isMemosLoading, setIsMemosLoading] = useState(false);
 
-    // Circle State - Initialized directly to avoid flashes
     const [isCircle, setIsCircle] = useState(() => {
         if (typeof window === 'undefined') return false;
         const savedUser = localStorage.getItem('arc_user');
         const sessionToken = localStorage.getItem('arc_session_token');
-        if (savedUser && sessionToken) {
+        if (savedUser) {
             try {
                 const user = JSON.parse(savedUser);
-                return user.walletType === 'circle';
+                // dev_circle users don't need a session token
+                if (user.walletType === 'dev_circle') return true;
+                // regular circle users need a session token
+                if (sessionToken && user.walletType === 'circle') return true;
             } catch (e) { return false; }
         }
         return false;
@@ -48,7 +53,7 @@ export default function WalletDashboardModal({ isOpen, onClose, externalSavingsB
         if (savedUser) {
             try {
                 const user = JSON.parse(savedUser);
-                return user.address || null;
+                return user.walletAddress || user.address || null;
             } catch (e) { return null; }
         }
         return null;
@@ -59,16 +64,13 @@ export default function WalletDashboardModal({ isOpen, onClose, externalSavingsB
     const [isCircleSending, setIsCircleSending] = useState(false);
     const [isCircleSuccess, setIsCircleSuccess] = useState(false);
 
-    // Business Savings State
     const [savingsAssets, setSavingsAssets] = useState<string>('0.00');
     const [isWithdrawing, setIsWithdrawing] = useState(false);
     const [showAddress, setShowAddress] = useState(false);
 
-    // Simplified Address & Connection
     const address = isCircle ? circleAddress : wagmiAddress;
     const isConnected = isCircle ? !!circleAddress : wagmiConnected;
 
-    // Detect Role (Simplified)
     const [isWorker, setIsWorker] = useState(false);
     useEffect(() => {
         const savedUser = localStorage.getItem('arc_user');
@@ -80,23 +82,19 @@ export default function WalletDashboardModal({ isOpen, onClose, externalSavingsB
         }
     }, []);
 
-    // Balance (Native USDC on Arc)
     const { data: wagmiBalanceData, isLoading: isWagmiBalanceLoading, refetch: refetchWagmiBalance } = useBalance({
         address: wagmiAddress,
         query: { enabled: !isCircle && !!wagmiAddress }
     });
 
-    // Send TX (Wagmi)
     const { sendTransaction: wagmiSend, data: hash, isPending: isWagmiPending, error: wagmiSendError, reset: resetWagmiSend } = useSendTransaction();
     const { isLoading: isWagmiConfirming, isSuccess: isWagmiSuccess } = useWaitForTransactionReceipt({ hash });
 
-    // ON-CHAIN REGISTRATION (For existing users)
     const [isManualRegistering, setIsManualRegistering] = useState(false);
     const { writeContract: writeUserRegistry, data: regHash } = useWriteContract();
     const { isLoading: isWagmiRegistering, isSuccess: isRegSuccess } = useWaitForTransactionReceipt({ hash: regHash });
     const isRegisteringOnChain = isManualRegistering || isWagmiRegistering;
 
-    // Check if current address is already registered
     const { data: currentAddressName } = useReadContract({
         address: CONTRACTS.UserRegistry.address,
         abi: CONTRACTS.UserRegistry.abi,
@@ -105,7 +103,6 @@ export default function WalletDashboardModal({ isOpen, onClose, externalSavingsB
         query: { enabled: !!address }
     });
 
-    // Name Resolution Logic
     const { data: nameResolution, isLoading: isResolvingName } = useReadContract({
         address: CONTRACTS.UserRegistry.address,
         abi: CONTRACTS.UserRegistry.abi,
@@ -128,7 +125,6 @@ export default function WalletDashboardModal({ isOpen, onClose, externalSavingsB
         }
     }, [recipient, nameResolution]);
 
-    // --- SOCIAL FEED NAME RESOLUTION ---
     const uniqueMemoAddresses = useMemo(() => {
         const addrs = new Set<string>();
         socialMemos.forEach(m => {
@@ -180,18 +176,25 @@ export default function WalletDashboardModal({ isOpen, onClose, externalSavingsB
         return map;
     }, [uniqueMemoAddresses, resolvedMemoNames]);
 
-    // Sync Circle Session State
     useEffect(() => {
         const checkSession = () => {
             const savedUser = localStorage.getItem('arc_user');
             const sessionToken = localStorage.getItem('arc_session_token');
-            if (savedUser && sessionToken) {
-                const user = JSON.parse(savedUser);
-                if (user.walletType === 'circle') {
-                    setIsCircle(true);
-                    setCircleAddress(user.address);
-                } else {
+            if (savedUser) {
+                try {
+                    const user = JSON.parse(savedUser);
+                    if (user.walletType === 'dev_circle') {
+                        setIsCircle(true);
+                        setCircleAddress(user.walletAddress || user.address || null);
+                    } else if (sessionToken && user.walletType === 'circle') {
+                        setIsCircle(true);
+                        setCircleAddress(user.address || null);
+                    } else {
+                        setIsCircle(false);
+                    }
+                } catch (e) {
                     setIsCircle(false);
+                    setCircleAddress(null);
                 }
             } else {
                 setIsCircle(false);
@@ -206,6 +209,25 @@ export default function WalletDashboardModal({ isOpen, onClose, externalSavingsB
 
     const fetchCircleBalance = React.useCallback(async () => {
         if (!isCircle || !isOpen) return;
+
+        // For dev_circle wallets, fetch balance directly from address
+        const savedUser = localStorage.getItem('arc_user');
+        if (savedUser) {
+            try {
+                const user = JSON.parse(savedUser);
+                if (user.walletType === 'dev_circle') {
+                    // Use wallet address directly - no session token needed
+                    const walletAddr = user.walletAddress || user.address;
+                    if (walletAddr) {
+                        setCircleAddress(walletAddr);
+                        // Balance will be read via on-chain hook (wagmi useBalance)
+                        // For now show 0 - on-chain balance hooks handle this
+                    }
+                    return;
+                }
+            } catch (e) { }
+        }
+
         setIsCircleBalanceLoading(true);
         try {
             const data = await getCircleBalance();
@@ -213,13 +235,8 @@ export default function WalletDashboardModal({ isOpen, onClose, externalSavingsB
                 if (data.balances && data.balances.length > 0) {
                     setCircleBalance(data.balances[0].amount);
                 }
-                // Fetch Savings from TaskEscrow via manual call or hook
-                // For simplicity, we'll use the readContract hook below
-                // Important: Update address if missing to unlock the UI
                 if (data.address && !circleAddress) {
                     setCircleAddress(data.address);
-
-                    // Sync back to localStorage for next time
                     const savedUser = localStorage.getItem('arc_user');
                     if (savedUser) {
                         try {
@@ -233,15 +250,12 @@ export default function WalletDashboardModal({ isOpen, onClose, externalSavingsB
         } catch (err: any) {
             console.error("Failed to fetch Circle balance:", err);
             if (err.message === "SESSION_EXPIRED") {
-                console.log("[WalletModal] Session expired, attempting auto-refresh...");
-                // Attempt to re-auth silently using stored email
                 const savedUser = localStorage.getItem('arc_user');
                 if (savedUser) {
                     try {
                         const user = JSON.parse(savedUser);
                         if (user.username) {
                             await setupArcWorkerWallet(user.username, 'worker', 'circle', { skipCreation: true });
-                            // Retry once after re-auth
                             const retryData = await getCircleBalance();
                             if (retryData?.balances?.[0]) {
                                 setCircleBalance(retryData.balances[0].amount);
@@ -263,7 +277,6 @@ export default function WalletDashboardModal({ isOpen, onClose, externalSavingsB
         }
     }, [isOpen, isCircle, fetchCircleBalance]);
 
-    // Fetch Savings (Wagmi Read)
     const { data: rawSavingsShares, refetch: refetchSavings } = useReadContract({
         address: CONTRACTS.TaskEscrow.address,
         abi: CONTRACTS.TaskEscrow.abi,
@@ -272,7 +285,6 @@ export default function WalletDashboardModal({ isOpen, onClose, externalSavingsB
         query: { enabled: !!address }
     });
 
-    // Convert Shares to Assets
     const { data: rawSavingsAssets } = useReadContract({
         address: CONTRACTS.MockYieldVault.address,
         abi: CONTRACTS.MockYieldVault.abi,
@@ -285,7 +297,6 @@ export default function WalletDashboardModal({ isOpen, onClose, externalSavingsB
         if (externalSavingsBalance) {
             setSavingsAssets(externalSavingsBalance);
         } else if (rawSavingsAssets) {
-            // Vault uses 18 decimals for internal accounting/assets conversion
             setSavingsAssets(formatUnits(rawSavingsAssets as bigint, 18));
         } else {
             setSavingsAssets('0.00');
@@ -324,7 +335,6 @@ export default function WalletDashboardModal({ isOpen, onClose, externalSavingsB
         }
     }, [isOpen, activeTab, fetchSocialMemos]);
 
-    // Reset state on close
     useEffect(() => {
         if (!isOpen) {
             const timer = setTimeout(() => {
@@ -342,11 +352,7 @@ export default function WalletDashboardModal({ isOpen, onClose, externalSavingsB
     }, [isOpen, resetWagmiSend]);
 
     const handleDoSend = async () => {
-        if (!isConnected) {
-            console.error("Not connected");
-            return;
-        }
-
+        if (!isConnected) return;
         const target = resolvedAddress || recipient;
         if (!target || !amount) return;
 
@@ -357,7 +363,7 @@ export default function WalletDashboardModal({ isOpen, onClose, externalSavingsB
                 setIsCircleSuccess(true);
                 addToContacts(target, recipient.startsWith('@') ? recipient.substring(1) : undefined);
                 fetchCircleBalance();
-                setMemo(''); // Clear memo
+                setMemo('');
             } catch (err) {
                 console.error("Circle Send Error:", err);
             } finally {
@@ -365,12 +371,7 @@ export default function WalletDashboardModal({ isOpen, onClose, externalSavingsB
             }
         } else {
             try {
-                wagmiSend({
-                    to: target as `0x${string}`,
-                    value: parseEther(amount)
-                });
-
-                // Record Social Memo after triggering Metamask
+                wagmiSend({ to: target as `0x${string}`, value: parseEther(amount) });
                 if (memo) {
                     await axios.post('/api/social/payment', {
                         fromAddress: address,
@@ -396,7 +397,6 @@ export default function WalletDashboardModal({ isOpen, onClose, externalSavingsB
 
         if (isCircle) {
             try {
-                // 1. Check availability first (Viem/PublicClient)
                 if (publicClient) {
                     setIsManualRegistering(true);
                     try {
@@ -410,15 +410,14 @@ export default function WalletDashboardModal({ isOpen, onClose, externalSavingsB
                         if (owner !== "0x0000000000000000000000000000000000000000") {
                             setIsManualRegistering(false);
                             if (address && owner.toLowerCase() === address.toLowerCase()) {
-                                alert("¡Ya estás registrado con este nombre! Refrescando interfaz...");
+                                alert("Already registered! Refreshing...");
                                 window.location.reload();
                                 return;
                             }
-                            alert(`El nombre @${username} ya está siendo usado por otro usuario. Intenta con uno diferente.`);
+                            alert(`@${username} is already taken. Try a different name.`);
                             return;
                         }
 
-                        // 2. Also check if address already has a name
                         const existingName = await publicClient.readContract({
                             address: CONTRACTS.UserRegistry.address,
                             abi: CONTRACTS.UserRegistry.abi,
@@ -428,13 +427,20 @@ export default function WalletDashboardModal({ isOpen, onClose, externalSavingsB
 
                         if (existingName && existingName.length > 0) {
                             setIsManualRegistering(false);
-                            alert(`Tu billetera ya está registrada con el nombre @${existingName}.`);
+                            alert(`Your wallet is already registered as @${existingName}.`);
                             window.location.reload();
                             return;
                         }
                     } catch (readErr) {
-                        console.warn("Pre-check failed, proceeding with transaction...", readErr);
+                        console.warn("Pre-check failed, proceeding...", readErr);
                     }
+                }
+
+                // Skip registration for dev_circle wallets - they don't use Circle SDK
+                if (user.walletType === 'dev_circle') {
+                    setIsManualRegistering(false);
+                    alert("On-chain name registration is not yet supported for Telegram wallets.");
+                    return;
                 }
 
                 const sessionToken = localStorage.getItem('arc_session_token');
@@ -450,57 +456,16 @@ export default function WalletDashboardModal({ isOpen, onClose, externalSavingsB
                         userToken: sessionToken!,
                         encryptionKey: encryptionKey || undefined
                     });
-
-                    // Show success state instead of instant reload
-                    alert("¡Registro iniciado! La transacción se está procesando en la red Arc.");
+                    alert("Registration initiated! Transaction is processing.");
                     setIsCircleSuccess(true);
-
-                    // Small delay & refresh local state
-                    setTimeout(() => {
-                        window.location.reload();
-                    }, 3000);
+                    setTimeout(() => { window.location.reload(); }, 3000);
                 }
             } catch (err: any) {
                 setIsManualRegistering(false);
                 console.error("Circle Register Error:", err);
-                const errorData = err.response?.data?.details || err.response?.data;
-
-                // Decode common errors
-                if (errorData?.message?.includes('already taken') || JSON.stringify(errorData).includes('taken')) {
-                    alert(`El nombre @${username} ya está ocupado. Elige otro.`);
-                    return;
-                }
-
-                if (errorData?.code === 155104 || errorData?.message?.includes('expired')) {
-                    console.log("[Register] Session expired, refreshing...");
-                    const savedUser = localStorage.getItem('arc_user');
-                    if (savedUser) {
-                        try {
-                            const user = JSON.parse(savedUser);
-                            if (user.username || user.userId) {
-                                // FIX: Don't force PIN flow (setupArcWorkerWallet) if user is Email-based
-                                // This causes "Ghost Wallets" (PIN wallet for Email user)
-                                if (user.walletType === 'circle' && user.authType === 'email') {
-                                    alert("Tu sesión ha expirado. Por seguridad, por favor desconecta y vuelve a iniciar sesión con tu email.");
-                                    return;
-                                }
-
-                                const targetId = user.userId || user.username;
-                                const fresh = await setupArcWorkerWallet(targetId, 'worker', 'circle', { skipCreation: true });
-                                if (fresh) {
-                                    handleRegisterOnChain();
-                                    return;
-                                }
-                            }
-                        } catch (reAuthErr) {
-                            console.error("[Register] Auto-refresh failed:", reAuthErr);
-                        }
-                    }
-                }
-                alert("Error de registro: " + (err.response?.data?.details?.message || err.message));
+                alert("Registration error: " + (err.response?.data?.details?.message || err.message));
             }
         } else {
-            // Pre-check for Wagmi/MetaMask
             setIsManualRegistering(true);
             if (publicClient) {
                 try {
@@ -514,11 +479,11 @@ export default function WalletDashboardModal({ isOpen, onClose, externalSavingsB
                     if (owner !== "0x0000000000000000000000000000000000000000") {
                         setIsManualRegistering(false);
                         if (address && owner.toLowerCase() === address.toLowerCase()) {
-                            alert("¡Ya estás registrado con este nombre!");
+                            alert("Already registered!");
                             window.location.reload();
                             return;
                         }
-                        alert(`El nombre @${username} ya está siendo usado por otro usuario. Intenta con uno diferente.`);
+                        alert(`@${username} is already taken.`);
                         return;
                     }
                 } catch (e) {
@@ -536,11 +501,10 @@ export default function WalletDashboardModal({ isOpen, onClose, externalSavingsB
     };
 
     const isPending = isCircle ? isCircleSending : isWagmiPending;
-    const isConfirming = isCircle ? false : isWagmiConfirming; // Circle sendTransfer waits for challenge
+    const isConfirming = isCircle ? false : isWagmiConfirming;
     const isSuccess = isCircle ? isCircleSuccess : isWagmiSuccess;
-    const sendError = isCircle ? circleError : wagmiSendError; // Error handling improved below
+    const sendError = isCircle ? circleError : wagmiSendError;
 
-    // Safely format balances
     const formattedWagmiBalance = wagmiBalanceData
         ? formatUnits(wagmiBalanceData.value, wagmiBalanceData.decimals)
         : '0.00';
@@ -548,13 +512,10 @@ export default function WalletDashboardModal({ isOpen, onClose, externalSavingsB
     const liquidBalance = isCircle ? Number(circleBalance) : Number(formattedWagmiBalance);
     const savingsBalance = Number(savingsAssets);
     const totalBalance = liquidBalance + savingsBalance;
-
     const balanceDisplay = totalBalance.toFixed(2);
     const liquidDisplay = liquidBalance.toFixed(2);
 
     const isAddressValid = resolvedAddress || (recipient.startsWith('0x') && recipient.length === 42);
-
-    // Function to handle "Connector not connected" by forcing a re-connect UI or suggestion
     const isConnectorError = typeof sendError !== 'string' && (sendError as any)?.message?.includes('Connector not connected');
 
     if (!isOpen) return null;
@@ -563,12 +524,7 @@ export default function WalletDashboardModal({ isOpen, onClose, externalSavingsB
         return (
             <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in">
                 <div className="bg-white rounded-3xl w-full max-w-sm overflow-hidden shadow-2xl p-8 text-center relative">
-                    <button
-                        onClick={onClose}
-                        className="absolute top-4 right-4 w-8 h-8 flex items-center justify-center bg-slate-100 text-slate-500 rounded-full hover:bg-slate-200 transition-colors"
-                    >
-                        ✕
-                    </button>
+                    <button onClick={onClose} className="absolute top-4 right-4 w-8 h-8 flex items-center justify-center bg-slate-100 text-slate-500 rounded-full hover:bg-slate-200 transition-colors">✕</button>
                     <div className="w-16 h-16 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center mx-auto mb-4 text-2xl">
                         {isCircle ? '⌛' : '⚡'}
                     </div>
@@ -576,17 +532,10 @@ export default function WalletDashboardModal({ isOpen, onClose, externalSavingsB
                         {isCircle ? 'Loading Wallet...' : 'Wallet Disconnected'}
                     </h3>
                     <p className="text-slate-500 text-sm mb-6">
-                        {isCircle
-                            ? 'Please wait while we sync your protocol wallet.'
-                            : 'Please connect your wallet to access funds.'
-                        }
+                        {isCircle ? 'Please wait while we sync your protocol wallet.' : 'Please connect your wallet to access funds.'}
                     </p>
-
                     {!isCircle ? (
-                        <button
-                            onClick={() => connect({ connector: connectors[0] })}
-                            className="w-full py-3 bg-[#005ddb] text-white font-bold rounded-xl hover:bg-blue-600 transition-all shadow-lg shadow-blue-500/20"
-                        >
+                        <button onClick={() => connect({ connector: connectors[0] })} className="w-full py-3 bg-[#005ddb] text-white font-bold rounded-xl hover:bg-blue-600 transition-all shadow-lg shadow-blue-500/20">
                             Connect Wallet
                         </button>
                     ) : (
@@ -597,21 +546,18 @@ export default function WalletDashboardModal({ isOpen, onClose, externalSavingsB
                     )}
                 </div>
             </div>
-        )
+        );
     }
 
     return (
         <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in">
             <div className="bg-white rounded-3xl w-full max-w-md overflow-hidden shadow-2xl relative min-h-[500px] flex flex-col transform transition-all">
-                {/* Header */}
                 <div className="p-6 bg-slate-50 border-b border-slate-100 flex justify-between items-center">
                     <div>
                         <h3 className="font-bold text-slate-800 text-lg">My Wallet</h3>
                         <div className="flex flex-col mt-1">
                             {currentAddressName && (
-                                <p className="text-[10px] font-black text-blue-600 uppercase tracking-widest mb-1">
-                                    @{currentAddressName as string}
-                                </p>
+                                <p className="text-[10px] font-black text-blue-600 uppercase tracking-widest mb-1">@{currentAddressName as string}</p>
                             )}
                             <div className="flex items-center gap-2">
                                 <div
@@ -620,89 +566,55 @@ export default function WalletDashboardModal({ isOpen, onClose, externalSavingsB
                                 >
                                     <div className="flex items-center gap-2">
                                         <span className="text-[11px] font-mono text-slate-600 tracking-tight font-bold">
-                                            {showAddress
-                                                ? (address ? `${address.substring(0, 6)}...${address.substring(38)}` : '0x...')
-                                                : '****...****'
-                                            }
+                                            {showAddress ? (address ? `${address.substring(0, 6)}...${address.substring(38)}` : '0x...') : '****...****'}
                                         </span>
                                     </div>
-                                    {showAddress ? (
-                                        <EyeOff className="w-3.5 h-3.5 text-slate-400 group-hover/address:text-slate-600 transition-colors" />
-                                    ) : (
-                                        <Eye className="w-3.5 h-3.5 text-slate-400 group-hover/address:text-slate-600 transition-colors" />
-                                    )}
+                                    {showAddress ? <EyeOff className="w-3.5 h-3.5 text-slate-400" /> : <Eye className="w-3.5 h-3.5 text-slate-400" />}
                                 </div>
-
                                 {showAddress && (
                                     <button
-                                        onClick={(e) => {
-                                            e.stopPropagation();
-                                            navigator.clipboard.writeText(address || '');
-                                            alert("Address copied!");
-                                        }}
+                                        onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(address || ''); alert("Address copied!"); }}
                                         className="p-1.5 bg-slate-100 rounded-lg border border-slate-200 hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200 transition text-slate-400"
-                                        title="Copy Address"
                                     >
                                         <Copy className="w-3.5 h-3.5" />
                                     </button>
                                 )}
                             </div>
-                        </div>                    </div>
-                    <button
-                        onClick={onClose}
-                        className="w-8 h-8 flex items-center justify-center bg-slate-200 text-slate-600 rounded-full hover:bg-slate-300 transition-colors font-bold"
-                    >
-                        ✕
-                    </button>
+                        </div>
+                    </div>
+                    <button onClick={onClose} className="w-8 h-8 flex items-center justify-center bg-slate-200 text-slate-600 rounded-full hover:bg-slate-300 transition-colors font-bold">✕</button>
                 </div>
 
-                {/* Tabs */}
                 <div className="flex p-2 bg-slate-50 border-b border-slate-100">
                     {['ASSETS', 'SEND', 'RECEIVE', 'ACTIVITY'].map(tab => (
-                        <button
-                            key={tab}
-                            onClick={() => setActiveTab(tab as any)}
-                            className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all ${activeTab === tab ? 'bg-white text-blue-600 shadow-sm ring-1 ring-black/5' : 'text-slate-400 hover:text-slate-600'}`}
-                        >
+                        <button key={tab} onClick={() => setActiveTab(tab as any)} className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all ${activeTab === tab ? 'bg-white text-blue-600 shadow-sm ring-1 ring-black/5' : 'text-slate-400 hover:text-slate-600'}`}>
                             {tab}
                         </button>
                     ))}
                 </div>
 
-                {/* Identity Banner */}
                 {!currentAddressName && (
                     <div className="bg-blue-600 p-3 flex items-center justify-between text-white animate-in slide-in-from-top duration-500">
                         <div className="flex items-center space-x-2">
                             <span className="text-sm">🆔</span>
                             <span className="text-[10px] font-bold uppercase tracking-wider">Identity not linked on-chain</span>
                         </div>
-                        <button
-                            onClick={() => handleRegisterOnChain()}
-                            disabled={isRegisteringOnChain}
-                            className="bg-white text-blue-600 px-3 py-1 rounded-lg text-[10px] font-black uppercase hover:bg-slate-100 transition-colors disabled:opacity-50"
-                        >
+                        <button onClick={() => handleRegisterOnChain()} disabled={isRegisteringOnChain} className="bg-white text-blue-600 px-3 py-1 rounded-lg text-[10px] font-black uppercase hover:bg-slate-100 transition-colors disabled:opacity-50">
                             {isRegisteringOnChain ? 'Signing...' : 'Register @Name'}
                         </button>
                     </div>
                 )}
 
-                {/* Content */}
                 <div className="flex-1 p-6 relative flex flex-col min-h-[550px]">
                     {activeTab === 'ASSETS' && (
                         <div className="text-center py-8 flex-1">
                             <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">Total Wallet Balance</p>
-                            <h2 className="text-5xl font-black text-slate-900 mb-2 tracking-tight">
-                                ${liquidDisplay}
-                            </h2>
+                            <h2 className="text-5xl font-black text-slate-900 mb-2 tracking-tight">${liquidDisplay}</h2>
 
                             <div className="mt-8 space-y-3">
-                                {/* Simplified Asset Row */}
                                 <div className="p-4 rounded-2xl border border-slate-100 flex items-center justify-between hover:bg-slate-50 transition-colors cursor-pointer group">
                                     <div className="flex items-center">
-                                        {/* USDC / Dollar Logo */}
-                                        <div className="w-10 h-10 bg-[#2775ca] rounded-full flex items-center justify-center text-white font-bold text-lg shadow-lg shadow-blue-500/20 group-hover:scale-110 transition-transform">
-                                            $
-                                        </div>
+                                        <div className="w-10 h-10 bg-[#2775ca] rounded-full flex items-center justify-center text-white font-bold text-lg shadow-lg shadow-blue-500/20 group-hover:scale-110 transition-transform">$</div>
                                         <div className="ml-3 text-left">
                                             <p className="font-bold text-slate-900 text-sm">USDC (Liquid)</p>
                                             <p className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter">Available for transfers</p>
@@ -711,19 +623,14 @@ export default function WalletDashboardModal({ isOpen, onClose, externalSavingsB
                                     <span className="font-bold text-slate-700">{liquidDisplay}</span>
                                 </div>
 
-                                {/* Business Savings Row (Funds from cancelled tasks or earnings) */}
                                 {Number(savingsAssets) > 0 && (
                                     <div className="p-4 rounded-2xl bg-blue-50 border border-blue-100 flex flex-col space-y-3 animate-in fade-in slide-in-from-bottom-2 duration-700">
                                         <div className="flex items-center justify-between">
                                             <div className="flex items-center">
-                                                <div className="w-10 h-10 bg-[#005edc] rounded-full flex items-center justify-center text-white font-bold text-lg shadow-md">
-                                                    🏦
-                                                </div>
+                                                <div className="w-10 h-10 bg-[#005edc] rounded-full flex items-center justify-center text-white font-bold text-lg shadow-md">🏦</div>
                                                 <div className="ml-3 text-left">
                                                     <p className="font-bold text-blue-900 text-sm">{isWorker ? 'Earnings Savings' : 'Business Savings'}</p>
-                                                    <p className="text-[9px] font-bold text-blue-400 uppercase tracking-tighter">
-                                                        {isWorker ? 'Earning 5% APY effectively' : 'Refunded from cancelled tasks'}
-                                                    </p>
+                                                    <p className="text-[9px] font-bold text-blue-400 uppercase tracking-tighter">{isWorker ? 'Earning 5% APY effectively' : 'Refunded from cancelled tasks'}</p>
                                                 </div>
                                             </div>
                                             <div className="text-right">
@@ -735,7 +642,6 @@ export default function WalletDashboardModal({ isOpen, onClose, externalSavingsB
                                             onClick={async () => {
                                                 if (!window.confirm("Withdraw all savings to your wallet?")) return;
                                                 setIsWithdrawing(true);
-
                                                 if (isCircle) {
                                                     try {
                                                         const savedUser = localStorage.getItem('arc_user');
@@ -744,37 +650,19 @@ export default function WalletDashboardModal({ isOpen, onClose, externalSavingsB
                                                         const userId = user.id || user.userId;
                                                         const userToken = localStorage.getItem('arc_session_token');
                                                         const encryptionKey = localStorage.getItem('arc_encryption_key');
-
-                                                        // Use "0" to indicate "Withdraw All" to the contract.
-                                                        // This avoids floating point precision mismatches (e.g. 3.14999 vs 3.15)
-                                                        // causing "Insufficient funds" errors.
-                                                        const amountWei = "0";
-
-                                                        const res = await axios.post('/api/circle/withdraw', {
-                                                            userId,
-                                                            amount: amountWei,
-                                                            userToken,
-                                                            encryptionKey
-                                                        });
-
+                                                        const res = await axios.post('/api/circle/withdraw', { userId, amount: "0", userToken, encryptionKey });
                                                         const data = res.data;
                                                         if (data.error) throw new Error(data.error);
-
                                                         const { W3SSdk } = await import('@circle-fin/w3s-pw-web-sdk');
                                                         const sdk = new W3SSdk();
                                                         sdk.setAppSettings({ appId: data.appId });
-                                                        sdk.setAuthentication({
-                                                            userToken: data.userToken,
-                                                            encryptionKey: data.encryptionKey
-                                                        });
-
+                                                        sdk.setAuthentication({ userToken: data.userToken, encryptionKey: data.encryptionKey });
                                                         await new Promise((resolve, reject) => {
                                                             sdk.execute(data.challengeId, (error: any, result: any) => {
                                                                 if (error) reject(error);
                                                                 else resolve(result);
                                                             });
                                                         });
-
                                                         alert("✅ Withdrawal Successful!");
                                                         refetchSavings();
                                                         fetchCircleBalance();
@@ -787,28 +675,24 @@ export default function WalletDashboardModal({ isOpen, onClose, externalSavingsB
                                                         setIsWithdrawing(false);
                                                     }
                                                 } else {
-                                                    // Wagmi Flow
                                                     writeWithdraw({
                                                         address: CONTRACTS.TaskEscrow.address,
                                                         abi: CONTRACTS.TaskEscrow.abi,
                                                         functionName: 'withdrawSavings',
-                                                        args: [BigInt(0)] // 0 means ALL
+                                                        args: [BigInt(0)]
                                                     });
                                                 }
                                             }}
                                             disabled={isWithdrawing || isWithdrawConfirming}
                                             className="w-full h-10 bg-blue-600 text-white text-[10px] font-black uppercase tracking-widest rounded-xl hover:bg-blue-700 transition-all shadow-md active:scale-[0.98] disabled:opacity-50"
                                         >
-                                            {isCircle ? (isWithdrawing ? 'Processing...' : 'Withdraw to Wallet') : (isWithdrawing || isWithdrawConfirming ? 'Processing...' : 'Withdraw to Wallet')}
+                                            {isWithdrawing || isWithdrawConfirming ? 'Processing...' : 'Withdraw to Wallet'}
                                         </button>
                                     </div>
                                 )}
                             </div>
 
-                            <button
-                                onClick={() => isCircle ? fetchCircleBalance() : refetchWagmiBalance()}
-                                className="mt-8 text-xs font-bold text-slate-400 hover:text-blue-600"
-                            >
+                            <button onClick={() => isCircle ? fetchCircleBalance() : refetchWagmiBalance()} className="mt-8 text-xs font-bold text-slate-400 hover:text-blue-600">
                                 {isCircleBalanceLoading || isWagmiBalanceLoading ? '↻ Updating...' : '↻ Refresh Balance'}
                             </button>
                         </div>
@@ -821,55 +705,33 @@ export default function WalletDashboardModal({ isOpen, onClose, externalSavingsB
                                     <div className="w-20 h-20 bg-green-100 text-green-600 rounded-full flex items-center justify-center mx-auto mb-4 text-4xl shadow-sm">✓</div>
                                     <h4 className="font-bold text-xl text-slate-900">Sent Successfully!</h4>
                                     <p className="text-sm text-slate-500 mt-2">Funds have been transferred.</p>
-                                    <button onClick={() => { setActiveTab('ASSETS'); setAmount(''); setRecipient(''); setMemo(''); isCircle ? setIsCircleSuccess(false) : resetWagmiSend(); }} className="mt-8 w-full py-3 bg-slate-100 text-slate-700 font-bold rounded-xl hover:bg-slate-200">
-                                        Done
-                                    </button>
+                                    <button onClick={() => { setActiveTab('ASSETS'); setAmount(''); setRecipient(''); setMemo(''); isCircle ? setIsCircleSuccess(false) : resetWagmiSend(); }} className="mt-8 w-full py-3 bg-slate-100 text-slate-700 font-bold rounded-xl hover:bg-slate-200">Done</button>
                                 </div>
                             ) : (
                                 <>
                                     <div>
                                         <label className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2 block">Recipient</label>
-                                        <input
-                                            type="text"
-                                            placeholder="@username or 0xAddress"
-                                            value={recipient}
-                                            onChange={(e) => setRecipient(e.target.value)}
-                                            className="w-full p-4 bg-slate-50 rounded-2xl font-mono text-sm font-bold text-slate-900 outline-none focus:ring-2 focus:ring-blue-500 transition-all border border-transparent focus:border-blue-500"
-                                        />
-
+                                        <input type="text" placeholder="@username or 0xAddress" value={recipient} onChange={(e) => setRecipient(e.target.value)} className="w-full p-4 bg-slate-50 rounded-2xl font-mono text-sm font-bold text-slate-900 outline-none focus:ring-2 focus:ring-blue-500 transition-all border border-transparent focus:border-blue-500" />
                                         {contacts.length > 0 && recipient.length === 0 && (
                                             <div className="mt-4 animate-in fade-in">
                                                 <p className="text-[9px] font-bold text-slate-300 uppercase tracking-widest mb-2">Recent</p>
                                                 <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-none">
                                                     {contacts.map((c, i) => (
-                                                        <button
-                                                            key={i}
-                                                            onClick={() => setRecipient(c.name ? `@${c.name}` : c.address)}
-                                                            className="flex items-center gap-2 p-2 bg-white border border-slate-100 rounded-lg hover:border-blue-300 transition shrink-0 shadow-sm"
-                                                        >
-                                                            <div className="w-6 h-6 rounded-full bg-gradient-to-br from-blue-400 to-indigo-500 flex items-center justify-center text-white text-[10px] font-bold">
-                                                                {c.name ? c.name[0].toUpperCase() : '0x'}
-                                                            </div>
-                                                            <div className="text-left">
-                                                                <p className="text-xs font-bold text-slate-700">{c.name ? `@${c.name}` : `${c.address.substring(0, 6)}...`}</p>
-                                                            </div>
+                                                        <button key={i} onClick={() => setRecipient(c.name ? `@${c.name}` : c.address)} className="flex items-center gap-2 p-2 bg-white border border-slate-100 rounded-lg hover:border-blue-300 transition shrink-0 shadow-sm">
+                                                            <div className="w-6 h-6 rounded-full bg-gradient-to-br from-blue-400 to-indigo-500 flex items-center justify-center text-white text-[10px] font-bold">{c.name ? c.name[0].toUpperCase() : '0x'}</div>
+                                                            <div className="text-left"><p className="text-xs font-bold text-slate-700">{c.name ? `@${c.name}` : `${c.address.substring(0, 6)}...`}</p></div>
                                                         </button>
                                                     ))}
                                                 </div>
                                             </div>
                                         )}
-
-                                        {/* Resolution Feedback */}
                                         <div className="h-6 mt-2">
                                             {recipient.startsWith('@') && recipient.length > 3 && (
                                                 <>
                                                     {isResolvingName ? (
                                                         <span className="text-xs text-slate-400 flex items-center"><span className="w-3 h-3 border-2 border-slate-300 border-t-blue-500 rounded-full animate-spin mr-2"></span> Searching...</span>
                                                     ) : resolvedAddress ? (
-                                                        <span className="text-xs text-green-600 font-bold flex items-center">
-                                                            <span>✓ Verified: </span>
-                                                            <span className="font-mono ml-1 bg-green-50 px-1 rounded">{resolvedAddress.substring(0, 6)}...{resolvedAddress.substring(38)}</span>
-                                                        </span>
+                                                        <span className="text-xs text-green-600 font-bold flex items-center"><span>✓ Verified: </span><span className="font-mono ml-1 bg-green-50 px-1 rounded">{resolvedAddress.substring(0, 6)}...{resolvedAddress.substring(38)}</span></span>
                                                     ) : (
                                                         <span className="text-xs text-red-400 font-bold">User not found</span>
                                                     )}
@@ -877,56 +739,28 @@ export default function WalletDashboardModal({ isOpen, onClose, externalSavingsB
                                             )}
                                         </div>
                                     </div>
-
                                     <div>
                                         <label className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2 block">Amount</label>
                                         <div className="relative">
-                                            <input
-                                                type="number"
-                                                placeholder="0.00"
-                                                value={amount}
-                                                onChange={(e) => setAmount(e.target.value)}
-                                                className="w-full p-4 pl-4 pr-20 bg-slate-50 rounded-2xl text-3xl font-black text-slate-900 outline-none focus:ring-2 focus:ring-blue-500 transition-all"
-                                            />
-                                            <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center space-x-2">
-                                                <span className="text-sm font-bold text-slate-500">USDC</span>
-                                            </div>
+                                            <input type="number" placeholder="0.00" value={amount} onChange={(e) => setAmount(e.target.value)} className="w-full p-4 pl-4 pr-20 bg-slate-50 rounded-2xl text-3xl font-black text-slate-900 outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
+                                            <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center space-x-2"><span className="text-sm font-bold text-slate-500">USDC</span></div>
                                         </div>
                                     </div>
-
                                     <div>
                                         <label className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2 block">Message (Optional)</label>
-                                        <input
-                                            type="text"
-                                            placeholder="What's this for?"
-                                            value={memo}
-                                            onChange={(e) => setMemo(e.target.value)}
-                                            className="w-full p-4 bg-slate-50 rounded-2xl text-sm font-bold text-slate-900 outline-none focus:ring-2 focus:ring-blue-500 transition-all border border-transparent focus:border-blue-500"
-                                        />
+                                        <input type="text" placeholder="What's this for?" value={memo} onChange={(e) => setMemo(e.target.value)} className="w-full p-4 bg-slate-50 rounded-2xl text-sm font-bold text-slate-900 outline-none focus:ring-2 focus:ring-blue-500 transition-all border border-transparent focus:border-blue-500" />
                                     </div>
-
                                     <div className="pt-4 mt-auto">
-                                        <button
-                                            onClick={handleDoSend}
-                                            disabled={!amount || !isAddressValid || isPending || isConfirming}
-                                            className="w-full py-4 bg-[#005ddb] text-white font-bold rounded-2xl hover:bg-blue-600 shadow-xl shadow-blue-500/20 transition-all disabled:opacity-50 disabled:shadow-none flex items-center justify-center transform active:scale-95"
-                                        >
+                                        <button onClick={handleDoSend} disabled={!amount || !isAddressValid || isPending || isConfirming} className="w-full py-4 bg-[#005ddb] text-white font-bold rounded-2xl hover:bg-blue-600 shadow-xl shadow-blue-500/20 transition-all disabled:opacity-50 disabled:shadow-none flex items-center justify-center transform active:scale-95">
                                             {isPending || isConfirming ? 'Processing Transaction...' : 'Confirm Send'}
                                         </button>
                                     </div>
-
                                     {isConnectorError && (
                                         <div className="mt-4 p-4 bg-red-50 text-red-600 rounded-xl text-center">
                                             <p className="text-xs font-bold mb-2">Connection Lost</p>
-                                            <button
-                                                onClick={() => connect({ connector: connectors[0] })}
-                                                className="px-4 py-2 bg-red-100 rounded-lg text-xs font-bold hover:bg-red-200"
-                                            >
-                                                Reconnect Wallet
-                                            </button>
+                                            <button onClick={() => connect({ connector: connectors[0] })} className="px-4 py-2 bg-red-100 rounded-lg text-xs font-bold hover:bg-red-200">Reconnect Wallet</button>
                                         </div>
                                     )}
-
                                     {sendError && !isConnectorError && (
                                         <div className="p-3 bg-red-50 text-red-500 text-xs rounded-xl border border-red-100 mt-4 break-words">
                                             <p className="font-bold mb-1">Error:</p>
@@ -942,23 +776,14 @@ export default function WalletDashboardModal({ isOpen, onClose, externalSavingsB
                         <div className="text-center py-8 flex flex-col items-center">
                             <div className="bg-white p-4 rounded-3xl border-2 border-slate-100 inline-block mb-6 shadow-sm">
                                 <div className="w-56 h-56 bg-white border border-slate-100 rounded-xl flex items-center justify-center text-slate-300 relative overflow-hidden">
-                                    <img
-                                        src={`https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${address}`}
-                                        alt="Wallet QR Code"
-                                        className="w-full h-full object-cover"
-                                    />
+                                    <img src={`https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${address}`} alt="Wallet QR Code" className="w-full h-full object-cover" />
                                 </div>
                             </div>
                             <div className="bg-slate-50 p-4 rounded-2xl w-full">
                                 <p className="text-xs text-slate-400 font-bold uppercase tracking-widest mb-1">Your Address</p>
                                 <p className="text-xs text-slate-700 font-mono break-all select-all">{address}</p>
                             </div>
-                            <button
-                                onClick={() => navigator.clipboard.writeText(address || '')}
-                                className="mt-4 w-full py-3 border-2 border-slate-100 text-slate-600 font-bold rounded-xl hover:bg-slate-50 hover:text-blue-600 transition-colors"
-                            >
-                                Copy Address
-                            </button>
+                            <button onClick={() => navigator.clipboard.writeText(address || '')} className="mt-4 w-full py-3 border-2 border-slate-100 text-slate-600 font-bold rounded-xl hover:bg-slate-50 hover:text-blue-600 transition-colors">Copy Address</button>
                         </div>
                     )}
 
@@ -968,7 +793,6 @@ export default function WalletDashboardModal({ isOpen, onClose, externalSavingsB
                                 <h4 className="font-bold text-slate-800">Social Feed</h4>
                                 <button onClick={fetchSocialMemos} className="text-xs text-blue-600 font-bold">Refresh</button>
                             </div>
-
                             {isMemosLoading ? (
                                 <div className="flex flex-col items-center justify-center py-20 opacity-50">
                                     <div className="w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mb-4"></div>
@@ -986,10 +810,8 @@ export default function WalletDashboardModal({ isOpen, onClose, externalSavingsB
                                         const isOutgoing = m.fromAddress?.toLowerCase() === address?.toLowerCase();
                                         const targetAddr = m.toAddress || '';
                                         const senderAddr = m.fromAddress || '';
-
                                         const targetName = socialNameMap[targetAddr.toLowerCase()];
                                         const senderName = socialNameMap[senderAddr.toLowerCase()];
-
                                         return (
                                             <div key={i} className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 flex items-start space-x-3 transition-all hover:border-blue-200">
                                                 <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white shrink-0 shadow-sm ${isOutgoing ? 'bg-blue-600' : 'bg-green-600'}`}>
@@ -998,41 +820,21 @@ export default function WalletDashboardModal({ isOpen, onClose, externalSavingsB
                                                 <div className="flex-1">
                                                     <div className="flex justify-between items-start">
                                                         <div className="flex flex-col">
-                                                            <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-0.5">
-                                                                {isOutgoing ? 'To' : 'From'}
-                                                            </p>
+                                                            <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-0.5">{isOutgoing ? 'To' : 'From'}</p>
                                                             <div className="text-sm font-black text-slate-900 flex items-center mb-1">
                                                                 {isOutgoing ? (
-                                                                    targetName ? (
-                                                                        <div className="flex flex-col">
-                                                                            <span className="text-blue-600">@{targetName}</span>
-                                                                            <span className="text-[10px] font-mono text-slate-400">{targetAddr.substring(0, 10)}...</span>
-                                                                        </div>
-                                                                    ) : (
-                                                                        <span className="font-mono text-xs">{targetAddr.substring(0, 16)}...</span>
-                                                                    )
+                                                                    targetName ? <div className="flex flex-col"><span className="text-blue-600">@{targetName}</span><span className="text-[10px] font-mono text-slate-400">{targetAddr.substring(0, 10)}...</span></div> : <span className="font-mono text-xs">{targetAddr.substring(0, 16)}...</span>
                                                                 ) : (
-                                                                    senderName ? (
-                                                                        <div className="flex flex-col">
-                                                                            <span className="text-green-600">@{senderName}</span>
-                                                                            <span className="text-[10px] font-mono text-slate-400">{senderAddr.substring(0, 10)}...</span>
-                                                                        </div>
-                                                                    ) : (
-                                                                        <span className="font-mono text-xs">{senderAddr.substring(0, 16)}...</span>
-                                                                    )
+                                                                    senderName ? <div className="flex flex-col"><span className="text-green-600">@{senderName}</span><span className="text-[10px] font-mono text-slate-400">{senderAddr.substring(0, 10)}...</span></div> : <span className="font-mono text-xs">{senderAddr.substring(0, 16)}...</span>
                                                                 )}
                                                             </div>
                                                         </div>
-                                                        <p className="text-xs font-black text-slate-900 shrink-0">
-                                                            {isOutgoing ? '-' : '+'}{m.amount} {m.symbol || 'USDC'}
-                                                        </p>
+                                                        <p className="text-xs font-black text-slate-900 shrink-0">{isOutgoing ? '-' : '+'}{m.amount} {m.symbol || 'USDC'}</p>
                                                     </div>
                                                     <div className="mt-2 p-3 bg-slate-50 rounded-xl border border-slate-100">
                                                         <p className="text-sm text-slate-700 font-medium italic">"{m.memo}"</p>
                                                     </div>
-                                                    <p className="text-[10px] text-slate-400 mt-2 font-bold uppercase tracking-tighter">
-                                                        {new Date(m.createdAt).toLocaleString()}
-                                                    </p>
+                                                    <p className="text-[10px] text-slate-400 mt-2 font-bold uppercase tracking-tighter">{new Date(m.createdAt).toLocaleString()}</p>
                                                 </div>
                                             </div>
                                         );
@@ -1043,6 +845,6 @@ export default function WalletDashboardModal({ isOpen, onClose, externalSavingsB
                     )}
                 </div>
             </div>
-        </div >
+        </div>
     );
 }
