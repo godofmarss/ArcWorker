@@ -359,13 +359,31 @@ const { data: wagmiBalanceData, isLoading: isWagmiBalanceLoading, refetch: refet
         if (!target || !amount) return;
 
         if (isCircle) {
-            setIsCircleSending(true);
-            try {
-                await sendCircleTransfer(target, amount, 'USDC', memo);
-                setIsCircleSuccess(true);
-                addToContacts(target, recipient.startsWith('@') ? recipient.substring(1) : undefined);
-                fetchCircleBalance();
-                setMemo('');
+    setIsCircleSending(true);
+    try {
+        const savedUser = localStorage.getItem('arc_user');
+        const user = savedUser ? JSON.parse(savedUser) : {};
+
+        if (user.walletType === 'dev_circle') {
+            // Server-side transfer for Telegram wallets
+            const res = await axios.post('/api/circle/transfer', {
+                fromAddress: address,
+                toAddress: target,
+                amount,
+                isDev: true,
+            });
+            const data = res.data;
+            if (data.error) throw new Error(data.error);
+            setIsCircleSuccess(true);
+            addToContacts(target, recipient.startsWith('@') ? recipient.substring(1) : undefined);
+            setTimeout(() => refetchWagmiBalance(), 3000);
+        } else {
+            await sendCircleTransfer(target, amount, 'USDC', memo);
+            setIsCircleSuccess(true);
+            addToContacts(target, recipient.startsWith('@') ? recipient.substring(1) : undefined);
+            fetchCircleBalance();
+        }
+        setMemo('');
             } catch (err) {
                 console.error("Circle Send Error:", err);
             } finally {
@@ -586,10 +604,10 @@ const { data: wagmiBalanceData, isLoading: isWagmiBalanceLoading, refetch: refet
                                 </div>
                                 {showAddress && (
                                     <button
-                                        onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(address || ''); alert("Address copied!"); }}
+                                        onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(address || ''); setCopied(true); setTimeout(() => setCopied(false), 2000); }}
                                         className="p-1.5 bg-slate-100 rounded-lg border border-slate-200 hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200 transition text-slate-400"
                                     >
-                                        <Copy className="w-3.5 h-3.5" />
+                                        <Copy className={`w-3.5 h-3.5 ${copied ? 'text-green-500' : ''}`} />
                                     </button>
                                 )}
                             </div>
@@ -705,7 +723,7 @@ const { data: wagmiBalanceData, isLoading: isWagmiBalanceLoading, refetch: refet
                                 )}
                             </div>
 
-                            <button onClick={() => isCircle ? fetchCircleBalance() : refetchWagmiBalance()} className="mt-8 text-xs font-bold text-slate-400 hover:text-blue-600">
+                            <button onClick={() => refetchWagmiBalance()} className="mt-8 text-xs font-bold text-slate-400 hover:text-blue-600">
                                 {isCircleBalanceLoading || isWagmiBalanceLoading ? '↻ Updating...' : '↻ Refresh Balance'}
                             </button>
                         </div>
@@ -796,7 +814,7 @@ const { data: wagmiBalanceData, isLoading: isWagmiBalanceLoading, refetch: refet
                                 <p className="text-xs text-slate-400 font-bold uppercase tracking-widest mb-1">Your Address</p>
                                 <p className="text-xs text-slate-700 font-mono break-all select-all">{address}</p>
                             </div>
-                            <button onClick={() => navigator.clipboard.writeText(address || '')} className="mt-4 w-full py-3 border-2 border-slate-100 text-slate-600 font-bold rounded-xl hover:bg-slate-50 hover:text-blue-600 transition-colors">Copy Address</button>
+                            <button onClick={() => { navigator.clipboard.writeText(address || ''); setCopied(true); setTimeout(() => setCopied(false), 2000); }} className="mt-4 w-full py-3 border-2 border-slate-100 text-slate-600 font-bold rounded-xl hover:bg-slate-50 hover:text-blue-600 transition-colors">{copied ? '✓ Copied!' : 'Copy Address'}</button>
                         </div>
                     )}
 
