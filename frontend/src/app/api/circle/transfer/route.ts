@@ -1,83 +1,133 @@
 import { NextResponse } from 'next/server';
-import { createCircleTransfer, getCircleWallet, createCircleSession } from '@/arcworker-sdk/wallet/server';
-import { createSocialPayment } from '@/utils/db';
+import { createCircleSession, findFundedWallet, createCircleTransfer } from '@/arcworker-sdk/wallet/server';
+import axios from 'axios';
+import crypto from 'crypto';
+
+// Developer-controlled wallet client
+const devClient = axios.create({
+    baseURL: 'https://api.circle.com/v1/w3s',
+    headers: { 'Content-Type': 'application/json' },
+});
+
+devClient.interceptors.request.use((config) => {
+    const key = (process.env.CIRCLE_TELEGRAM_API_KEY || process.env.CIRCLE_API_KEY || '').replace(/['"]+/g, '').trim();
+    config.headers['Authorization'] = `Bearer ${key}`;
+    return config;
+});
+
+async function generateEntitySecretCiphertext(entitySecret: string): Promise<string> {
+    const pubKeyRes = await devClient.get('/config/entity/publicKey');
+    const publicKeyPem = pubKeyRes.data.data.publicKey;
+    const encrypted = crypto.publicEncrypt(
+        { key: publicKeyPem, padding: crypto.constants.RSA_PKCS1_OAEP_PADDING, oaepHash: 'sha256' },
+        Buffer.from(entitySecret, 'hex')
+    );
+    return encrypted.toString('base64');
+}
+
+async function getDevWalletId(walletAddress: string): Promise<string | null> {
+    try {
+        let pageAfter: string | undefined;
+        do {
+            const res = await devClient.get('/wallets', {
+                params: { pageSize: 50, ...(pageAfter ? { pageAfter } : {}) }
+            });
+            const wallets = res.data.data?.wallets || [];
+            const match = wallets.find((w: any) =>
+                w.address?.toLowerCase() === walletAddress.toLowerCase()
+            );
+            if (match) {
+                console.log(`[Dev Transfer] Found wallet ID: ${match.id}`);
+                return match.id;
+            }
+            pageAfter = res.data.data?.pageAfter;
+        } while (pageAfter);
+        return null;
+    } catch (e: any) {
+        console.error('[Dev Transfer] Failed to list wallets:', e.response?.data || e.message);
+        return null;
+    }
+}
 
 export async function POST(request: Request) {
     try {
-        const { userToken: providedUserToken, toAddress, amount, token, memo } = await request.json();
+        const body = await request.json();
+        const { fromAddress, toAddress, amount, isDev, userId, userToken } = body;
 
         if (!toAddress || !amount) {
-            return NextResponse.json({ error: 'Missing destination or amount' }, { status: 400 });
+            return NextResponse.json({ error: 'Missing toAddress or amount' }, { status: 400 });
         }
 
-        const userToken = providedUserToken;
-        if (!userToken) {
-            return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
-        }
+        // --- DEV CIRCLE FLOW (Telegram wallets) ---
+        if (isDev && fromAddress) {
+            console.log(`[Dev Transfer] ${fromAddress} → ${toAddress} | Amount: ${amount}`);
 
-        // Get Wallet (to get ID)
-        const wallet = await getCircleWallet(providedUserToken);
-        if (!wallet) {
-            console.error('[Circle Transfer] No wallet found for userToken');
-            return NextResponse.json({ error: 'Wallet not found' }, { status: 404 });
-        }
+            const entitySecret = (process.env.CIRCLE_ENTITY_SECRET || '').replace(/['"]+/g, '').trim();
+            if (!entitySecret) {
+                return NextResponse.json({ error: 'CIRCLE_ENTITY_SECRET not configured' }, { status: 500 });
+            }
 
-        console.log(`[Circle Transfer] Using wallet: ${wallet.id} (${wallet.address}) on ${wallet.blockchain}`);
+            const walletId = await getDevWalletId(fromAddress);
+            if (!walletId) {
+                return NextResponse.json({ error: 'Source wallet not found' }, { status: 404 });
+            }
 
-        // 3. Resolve Token ID (Mandatory for Circle Transfer API)
-        const { getCircleBalances } = require('@/arcworker-sdk/wallet/server');
-        const balances = await getCircleBalances(providedUserToken, wallet.id);
+            const ciphertext = await generateEntitySecretCiphertext(entitySecret);
 
-        if (!balances || balances.length === 0) {
-            return NextResponse.json({ error: 'No tokens found in wallet' }, { status: 400 });
-        }
+            const res = await devClient.post('/developer/transactions/transfer', {
+                idempotencyKey: crypto.randomUUID(),
+                entitySecretCiphertext: ciphertext,
+                walletId,
+                destinationAddress: toAddress,
+                amounts: [amount.toString()],
+                feeLevel: 'HIGH',
+                tokenAddress: '0x3600000000000000000000000000000000000000',
+                blockchain: 'ARC-TESTNET',
+            });
 
-        let tokenId = undefined;
-        const requestedSymbol = token || 'ETH'; // Default to Native
+            const transactionId = res.data.data?.id;
+            console.log(`[Dev Transfer] Transaction submitted: ${transactionId}`);
 
-        // Try to find matching token
-        const matchedBalance = balances.find((b: any) =>
-            b.token.symbol.toUpperCase() === requestedSymbol.toUpperCase()
-        );
-
-        if (matchedBalance) {
-            tokenId = matchedBalance.token.id;
-        } else {
-            // Fallback to first available token if requested not found
-            console.warn(`[Circle Transfer] Requested token ${requestedSymbol} not found, falling back to ${balances[0].token.symbol}`);
-            tokenId = balances[0].token.id;
-        }
-
-        console.log(`[Circle Transfer] Final params: Amount=${amount}, TokenId=${tokenId}, Symbol=${requestedSymbol}`);
-
-        const challengeId = await createCircleTransfer(
-            providedUserToken,
-            wallet.id,
-            toAddress,
-            amount,
-            tokenId
-        );
-
-        // Store Memo if provided
-        if (memo && challengeId) {
-            await createSocialPayment({
-                txHash: challengeId, // We use challengeId as a temporary ref until we get txHash, or just keep it
-                fromAddress: wallet.address,
-                toAddress: toAddress,
-                amount: amount,
-                symbol: requestedSymbol,
-                memo: memo
+            return NextResponse.json({
+                success: true,
+                transactionId,
+                message: `Transfer of ${amount} USDC submitted successfully.`
             });
         }
 
-        return NextResponse.json({ challengeId });
+        // --- REGULAR CIRCLE FLOW (Email wallets) ---
+        if (!userId && !userToken) {
+            return NextResponse.json({ error: 'Missing userId or userToken' }, { status: 400 });
+        }
+
+        const session = userToken
+            ? { userToken, encryptionKey: '' }
+            : await createCircleSession(userId);
+
+        const { wallet } = await findFundedWallet(session.userToken, amount);
+        if (!wallet) {
+            return NextResponse.json({ error: 'No funded wallet found' }, { status: 400 });
+        }
+
+        const challengeId = await createCircleTransfer(
+            session.userToken,
+            wallet.id,
+            toAddress,
+            amount
+        );
+
+        return NextResponse.json({
+            success: true,
+            challengeId,
+            userToken: session.userToken,
+        });
 
     } catch (error: any) {
         const errorData = error.response?.data || { message: error.message };
-        console.error('Circle Transfer Endpoint Error:', errorData);
+        console.error('[Transfer] Error:', JSON.stringify(errorData, null, 2));
         return NextResponse.json({
-            error: 'Failed to initiate transfer',
+            error: 'Transfer failed',
             details: errorData
-        }, { status: 500 });
+        }, { status: error.response?.status || 500 });
     }
 }
