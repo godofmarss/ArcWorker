@@ -14,7 +14,6 @@ interface WalletDashboardModalProps {
     externalSavingsBalance?: string;
 }
 
-// Helper to check if user is using any Circle wallet type
 const isCircleWallet = (walletType: string) => walletType === 'circle' || walletType === 'dev_circle';
 
 export default function WalletDashboardModal({ isOpen, onClose, externalSavingsBalance }: WalletDashboardModalProps) {
@@ -22,28 +21,28 @@ export default function WalletDashboardModal({ isOpen, onClose, externalSavingsB
     const { connectors, connect } = useConnect();
     const publicClient = usePublicClient();
     const { getBalance: getCircleBalance, sendTransfer: sendCircleTransfer, setupArcWorkerWallet, isLoading: isCircleLoading, error: circleError } = useArcWorkerWallet();
+
     // Auto-clear stale session if wallet loading is stuck
-useEffect(() => {
-    if (!isCircleLoading) return;
-    const timeout = setTimeout(() => {
-        const savedUser = localStorage.getItem('arc_user');
-        if (savedUser) {
-            try {
-                const user = JSON.parse(savedUser);
-                // Only clear for dev_circle (Telegram) wallets — they don't use Circle SDK
-                if (user.walletType === 'dev_circle') {
-                    console.log('[WalletModal] Stale dev_circle session detected, clearing...');
-                    localStorage.removeItem('arc_user');
-                    localStorage.removeItem('arc_session_token');
-                    localStorage.removeItem('arc_encryption_key');
-                    localStorage.removeItem('arc_wallet_address');
-                    window.location.reload();
-                }
-            } catch (e) {}
-        }
-    }, 5000); // 5 seconds timeout
-    return () => clearTimeout(timeout);
-}, [isCircleLoading]);
+    useEffect(() => {
+        if (!isCircleLoading) return;
+        const timeout = setTimeout(() => {
+            const savedUser = localStorage.getItem('arc_user');
+            if (savedUser) {
+                try {
+                    const user = JSON.parse(savedUser);
+                    if (user.walletType === 'dev_circle') {
+                        console.log('[WalletModal] Stale dev_circle session detected, clearing...');
+                        localStorage.removeItem('arc_user');
+                        localStorage.removeItem('arc_session_token');
+                        localStorage.removeItem('arc_encryption_key');
+                        localStorage.removeItem('arc_wallet_address');
+                        window.location.reload();
+                    }
+                } catch (e) {}
+            }
+        }, 5000);
+        return () => clearTimeout(timeout);
+    }, [isCircleLoading]);
 
     const [activeTab, setActiveTab] = useState<'ASSETS' | 'SEND' | 'RECEIVE' | 'ACTIVITY'>('ASSETS');
     const [recipient, setRecipient] = useState('');
@@ -56,13 +55,10 @@ useEffect(() => {
     const [isCircle, setIsCircle] = useState(() => {
         if (typeof window === 'undefined') return false;
         const savedUser = localStorage.getItem('arc_user');
-        const sessionToken = localStorage.getItem('arc_session_token');
         if (savedUser) {
             try {
                 const user = JSON.parse(savedUser);
-                // dev_circle users don't need a session token
                 if (user.walletType === 'dev_circle') return true;
-                // regular circle users need a session token
                 if (user.walletType === 'circle') return true;
             } catch (e) { return false; }
         }
@@ -85,13 +81,19 @@ useEffect(() => {
     const [isCircleBalanceLoading, setIsCircleBalanceLoading] = useState(false);
     const [isCircleSending, setIsCircleSending] = useState(false);
     const [isCircleSuccess, setIsCircleSuccess] = useState(false);
-
     const [savingsAssets, setSavingsAssets] = useState<string>('0.00');
     const [isWithdrawing, setIsWithdrawing] = useState(false);
     const [showAddress, setShowAddress] = useState(false);
     const [copied, setCopied] = useState(false);
-const [isDevSending, setIsDevSending] = useState(false);
+    const [isDevSending, setIsDevSending] = useState(false);
     const [isRefreshing, setIsRefreshing] = useState(false);
+
+    // Reauth states for linked Circle wallet users with no session token
+    const [needsReauth, setNeedsReauth] = useState(false);
+    const [reauthEmail, setReauthEmail] = useState('');
+    const [reauthOtp, setReauthOtp] = useState('');
+    const [reauthStep, setReauthStep] = useState<'email' | 'otp' | 'loading'>('email');
+    const [reauthError, setReauthError] = useState('');
 
     const address = isCircle ? circleAddress : wagmiAddress;
     const isConnected = isCircle ? !!circleAddress : wagmiConnected;
@@ -107,12 +109,11 @@ const [isDevSending, setIsDevSending] = useState(false);
         }
     }, []);
 
-    const devCircleAddress = isCircle && circleAddress ? circleAddress as `0x${string}` : undefined;
-
-const { data: wagmiBalanceData, isLoading: isWagmiBalanceLoading, refetch: refetchWagmiBalance } = useBalance({
-    address: devCircleAddress || wagmiAddress,
-    query: { enabled: !!devCircleAddress || (!isCircle && !!wagmiAddress) }
-});
+    const balanceAddress = (isCircle ? circleAddress : wagmiAddress) as `0x${string}` | undefined;
+    const { data: wagmiBalanceData, isLoading: isWagmiBalanceLoading, refetch: refetchWagmiBalance } = useBalance({
+        address: balanceAddress,
+        query: { enabled: !!balanceAddress }
+    });
 
     const { sendTransaction: wagmiSend, data: hash, isPending: isWagmiPending, error: wagmiSendError, reset: resetWagmiSend } = useSendTransaction();
     const { isLoading: isWagmiConfirming, isSuccess: isWagmiSuccess } = useWaitForTransactionReceipt({ hash });
@@ -135,9 +136,7 @@ const { data: wagmiBalanceData, isLoading: isWagmiBalanceLoading, refetch: refet
         abi: CONTRACTS.UserRegistry.abi,
         functionName: 'resolve',
         args: [recipient.replace('@', '').toLowerCase()],
-        query: {
-            enabled: recipient.startsWith('@') && recipient.length > 3
-        }
+        query: { enabled: recipient.startsWith('@') && recipient.length > 3 }
     });
 
     useEffect(() => {
@@ -162,7 +161,6 @@ const { data: wagmiBalanceData, isLoading: isWagmiBalanceLoading, refetch: refet
     }, [socialMemos]);
 
     const [contacts, setContacts] = useState<any[]>([]);
-
     useEffect(() => {
         const stored = localStorage.getItem('arc_contacts');
         if (stored) setContacts(JSON.parse(stored));
@@ -185,9 +183,7 @@ const { data: wagmiBalanceData, isLoading: isWagmiBalanceLoading, refetch: refet
             functionName: 'getName',
             args: [addr as `0x${string}`],
         })),
-        query: {
-            enabled: uniqueMemoAddresses.length > 0
-        }
+        query: { enabled: uniqueMemoAddresses.length > 0 }
     });
 
     const socialNameMap = useMemo(() => {
@@ -213,20 +209,30 @@ const { data: wagmiBalanceData, isLoading: isWagmiBalanceLoading, refetch: refet
                     if (user.walletType === 'dev_circle') {
                         setIsCircle(true);
                         setCircleAddress(user.walletAddress || user.address || null);
+                        setNeedsReauth(false);
                     } else if (user.walletType === 'circle') {
-    // Allow circle wallet users even without session token (linked Telegram accounts)
-    setIsCircle(true);
-    setCircleAddress(user.walletAddress || user.address || null);
-} else {
-    setIsCircle(false);
-}
+                        setIsCircle(true);
+                        setCircleAddress(user.walletAddress || user.address || null);
+                        // Flag linked Telegram users with no session token for reauth
+                        if (!sessionToken) {
+                            setNeedsReauth(true);
+                            setReauthEmail(user.email || '');
+                        } else {
+                            setNeedsReauth(false);
+                        }
+                    } else {
+                        setIsCircle(false);
+                        setNeedsReauth(false);
+                    }
                 } catch (e) {
                     setIsCircle(false);
                     setCircleAddress(null);
+                    setNeedsReauth(false);
                 }
             } else {
                 setIsCircle(false);
                 setCircleAddress(null);
+                setNeedsReauth(false);
             }
         };
 
@@ -237,32 +243,22 @@ const { data: wagmiBalanceData, isLoading: isWagmiBalanceLoading, refetch: refet
 
     const fetchCircleBalance = React.useCallback(async () => {
         if (!isCircle || !isOpen) return;
-
-        // For dev_circle wallets, fetch balance directly from address
         const savedUser = localStorage.getItem('arc_user');
         if (savedUser) {
             try {
                 const user = JSON.parse(savedUser);
                 if (user.walletType === 'dev_circle') {
-                    // Use wallet address directly - no session token needed
                     const walletAddr = user.walletAddress || user.address;
-                    if (walletAddr) {
-                        setCircleAddress(walletAddr);
-                        // Balance will be read via on-chain hook (wagmi useBalance)
-                        // For now show 0 - on-chain balance hooks handle this
-                    }
+                    if (walletAddr) setCircleAddress(walletAddr);
                     return;
                 }
             } catch (e) { }
         }
-
         setIsCircleBalanceLoading(true);
         try {
             const data = await getCircleBalance();
             if (data) {
-                if (data.balances && data.balances.length > 0) {
-                    setCircleBalance(data.balances[0].amount);
-                }
+                if (data.balances && data.balances.length > 0) setCircleBalance(data.balances[0].amount);
                 if (data.address && !circleAddress) {
                     setCircleAddress(data.address);
                     const savedUser = localStorage.getItem('arc_user');
@@ -285,9 +281,7 @@ const { data: wagmiBalanceData, isLoading: isWagmiBalanceLoading, refetch: refet
                         if (user.username) {
                             await setupArcWorkerWallet(user.username, 'worker', 'circle', { skipCreation: true });
                             const retryData = await getCircleBalance();
-                            if (retryData?.balances?.[0]) {
-                                setCircleBalance(retryData.balances[0].amount);
-                            }
+                            if (retryData?.balances?.[0]) setCircleBalance(retryData.balances[0].amount);
                         }
                     } catch (reAuthErr) {
                         console.error("[WalletModal] Auto-refresh failed:", reAuthErr);
@@ -300,9 +294,7 @@ const { data: wagmiBalanceData, isLoading: isWagmiBalanceLoading, refetch: refet
     }, [isCircle, isOpen, getCircleBalance, circleAddress]);
 
     useEffect(() => {
-        if (isOpen && isCircle) {
-            fetchCircleBalance();
-        }
+        if (isOpen && isCircle) fetchCircleBalance();
     }, [isOpen, isCircle, fetchCircleBalance]);
 
     const { data: rawSavingsShares, refetch: refetchSavings } = useReadContract({
@@ -322,13 +314,9 @@ const { data: wagmiBalanceData, isLoading: isWagmiBalanceLoading, refetch: refet
     });
 
     useEffect(() => {
-        if (externalSavingsBalance) {
-            setSavingsAssets(externalSavingsBalance);
-        } else if (rawSavingsAssets) {
-            setSavingsAssets(formatUnits(rawSavingsAssets as bigint, 18));
-        } else {
-            setSavingsAssets('0.00');
-        }
+        if (externalSavingsBalance) setSavingsAssets(externalSavingsBalance);
+        else if (rawSavingsAssets) setSavingsAssets(formatUnits(rawSavingsAssets as bigint, 18));
+        else setSavingsAssets('0.00');
     }, [rawSavingsAssets, externalSavingsBalance]);
 
     const { writeContract: writeWithdraw, data: withdrawHash } = useWriteContract();
@@ -358,9 +346,7 @@ const { data: wagmiBalanceData, isLoading: isWagmiBalanceLoading, refetch: refet
     }, [address]);
 
     useEffect(() => {
-        if (isOpen && activeTab === 'ACTIVITY') {
-            fetchSocialMemos();
-        }
+        if (isOpen && activeTab === 'ACTIVITY') fetchSocialMemos();
     }, [isOpen, activeTab, fetchSocialMemos]);
 
     useEffect(() => {
@@ -385,47 +371,44 @@ const { data: wagmiBalanceData, isLoading: isWagmiBalanceLoading, refetch: refet
         if (!target || !amount) return;
 
         if (isCircle) {
-    setIsCircleSending(true);
-    try {
-        const savedUser = localStorage.getItem('arc_user');
-        const user = savedUser ? JSON.parse(savedUser) : {};
+            setIsCircleSending(true);
+            try {
+                const savedUser = localStorage.getItem('arc_user');
+                const user = savedUser ? JSON.parse(savedUser) : {};
 
-        if (user.walletType === 'dev_circle') {
-    const res = await axios.post('/api/circle/transfer', {
-        fromAddress: address,
-        toAddress: target,
-        amount,
-        isDev: true,
-    });
-    const data = res.data;
-    if (data.error) throw new Error(data.error);
-    // Save to social feed
-    // Save to social feed (always, even without memo)
-await axios.post('/api/social/payment', {
-    fromAddress: address,
-    toAddress: target,
-    amount,
-    symbol: 'USDC',
-    memo: memo || `Sent ${amount} USDC`,
-}).catch(() => {});
-    setIsCircleSuccess(true);
-    addToContacts(target, recipient.startsWith('@') ? recipient.substring(1) : undefined);
-    setTimeout(() => refetchWagmiBalance(), 3000);
-        } else {
-    await sendCircleTransfer(target, amount, 'USDC', memo);
-    // Save to activity feed
-    await axios.post('/api/social/payment', {
-        fromAddress: address,
-        toAddress: target,
-        amount,
-        symbol: 'USDC',
-        memo: memo || `Sent ${amount} USDC`,
-    }).catch(() => {});
-    setIsCircleSuccess(true);
-    addToContacts(target, recipient.startsWith('@') ? recipient.substring(1) : undefined);
-    fetchCircleBalance();
-}
-        setMemo('');
+                if (user.walletType === 'dev_circle') {
+                    const res = await axios.post('/api/circle/transfer', {
+                        fromAddress: address,
+                        toAddress: target,
+                        amount,
+                        isDev: true,
+                    });
+                    const data = res.data;
+                    if (data.error) throw new Error(data.error);
+                    await axios.post('/api/social/payment', {
+                        fromAddress: address,
+                        toAddress: target,
+                        amount,
+                        symbol: 'USDC',
+                        memo: memo || `Sent ${amount} USDC`,
+                    }).catch(() => {});
+                    setIsCircleSuccess(true);
+                    addToContacts(target, recipient.startsWith('@') ? recipient.substring(1) : undefined);
+                    setTimeout(() => refetchWagmiBalance(), 3000);
+                } else {
+                    await sendCircleTransfer(target, amount, 'USDC', memo);
+                    await axios.post('/api/social/payment', {
+                        fromAddress: address,
+                        toAddress: target,
+                        amount,
+                        symbol: 'USDC',
+                        memo: memo || `Sent ${amount} USDC`,
+                    }).catch(() => {});
+                    setIsCircleSuccess(true);
+                    addToContacts(target, recipient.startsWith('@') ? recipient.substring(1) : undefined);
+                    fetchCircleBalance();
+                }
+                setMemo('');
             } catch (err) {
                 console.error("Circle Send Error:", err);
             } finally {
@@ -498,7 +481,6 @@ await axios.post('/api/social/payment', {
                     }
                 }
 
-                // Dev Circle (Telegram) wallets — server-side registration, no SDK needed
                 if (user.walletType === 'dev_circle') {
                     const walletAddr = user.walletAddress || user.address;
                     const { data } = await axios.post('/api/circle/contract/register-name', {
@@ -592,6 +574,102 @@ await axios.post('/api/social/payment', {
     const isConnectorError = typeof sendError !== 'string' && (sendError as any)?.message?.includes('Connector not connected');
 
     if (!isOpen) return null;
+
+    // Reauth screen for linked Circle wallet users with no session token
+    if (isConnected && needsReauth) {
+        return (
+            <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in">
+                <div className="bg-white rounded-3xl w-full max-w-sm overflow-hidden shadow-2xl p-8 relative">
+                    <button onClick={onClose} className="absolute top-4 right-4 w-8 h-8 flex items-center justify-center bg-slate-100 text-slate-500 rounded-full hover:bg-slate-200">✕</button>
+                    <div className="text-center mb-6">
+                        <div className="w-14 h-14 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center mx-auto mb-4 text-2xl">🔐</div>
+                        <h3 className="font-bold text-slate-900 text-lg">Verify Your Identity</h3>
+                        <p className="text-slate-500 text-sm mt-1">Enter the code sent to your email to activate your wallet session.</p>
+                    </div>
+
+                    {reauthStep === 'email' && (
+                        <div className="space-y-3">
+                            <input
+                                type="email"
+                                value={reauthEmail}
+                                onChange={(e) => setReauthEmail(e.target.value)}
+                                placeholder="your@email.com"
+                                className="w-full px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 text-slate-900 text-sm font-bold focus:outline-none focus:border-blue-500"
+                            />
+                            {reauthError && <p className="text-red-500 text-xs">{reauthError}</p>}
+                            <button
+                                onClick={async () => {
+                                    setReauthStep('loading');
+                                    setReauthError('');
+                                    try {
+                                        const res = await axios.post('/api/auth/send-otp', { email: reauthEmail });
+                                        if (res.data.success) setReauthStep('otp');
+                                        else throw new Error(res.data.error);
+                                    } catch (e: any) {
+                                        setReauthError(e.message || 'Failed to send code');
+                                        setReauthStep('email');
+                                    }
+                                }}
+                                className="w-full py-3 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 transition-all"
+                            >
+                                Send Verification Code
+                            </button>
+                        </div>
+                    )}
+
+                    {reauthStep === 'loading' && (
+                        <div className="flex items-center justify-center py-8">
+                            <div className="w-8 h-8 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
+                        </div>
+                    )}
+
+                    {reauthStep === 'otp' && (
+                        <div className="space-y-3">
+                            <input
+                                type="text"
+                                inputMode="numeric"
+                                pattern="[0-9]*"
+                                value={reauthOtp}
+                                onChange={(e) => setReauthOtp(e.target.value.replace(/\D/g, ''))}
+                                placeholder="000000"
+                                maxLength={6}
+                                className="w-full px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 text-slate-900 text-2xl font-bold text-center tracking-widest focus:outline-none focus:border-blue-500"
+                            />
+                            {reauthError && <p className="text-red-500 text-xs">{reauthError}</p>}
+                            <button
+                                onClick={async () => {
+                                    setReauthStep('loading');
+                                    setReauthError('');
+                                    try {
+                                        const verifyRes = await axios.post('/api/auth/reauth-session', {
+                                            email: reauthEmail,
+                                            otp: reauthOtp,
+                                        });
+                                        if (!verifyRes.data.success) throw new Error(verifyRes.data.error);
+                                        localStorage.setItem('arc_session_token', verifyRes.data.userToken);
+                                        if (verifyRes.data.encryptionKey) {
+                                            localStorage.setItem('arc_encryption_key', verifyRes.data.encryptionKey);
+                                        }
+                                        setNeedsReauth(false);
+                                        setReauthOtp('');
+                                        setReauthStep('email');
+                                    } catch (e: any) {
+                                        setReauthError(e.message || 'Verification failed');
+                                        setReauthStep('otp');
+                                    }
+                                }}
+                                disabled={reauthOtp.length < 6}
+                                className="w-full py-3 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 transition-all disabled:opacity-50"
+                            >
+                                Verify & Activate Wallet
+                            </button>
+                            <button onClick={() => { setReauthOtp(''); setReauthStep('email'); }} className="w-full py-2 text-slate-400 text-sm">← Resend code</button>
+                        </div>
+                    )}
+                </div>
+            </div>
+        );
+    }
 
     if (!isConnected || !address) {
         return (
