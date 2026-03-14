@@ -11,9 +11,9 @@ export async function POST(request: Request) {
         }
 
         const result = await sql`
-            SELECT id, username, otp_code, otp_expires_at
-            FROM users WHERE email = ${email.toLowerCase()}
-        `;
+    SELECT id, username, email, otp_code, otp_expires_at
+    FROM users WHERE email = ${email.toLowerCase()}
+`;
 
         if (result.rows.length === 0) {
             return NextResponse.json({ error: 'User not found' }, { status: 404 });
@@ -31,7 +31,7 @@ export async function POST(request: Request) {
 
         await sql`UPDATE users SET otp_code = NULL, otp_expires_at = NULL WHERE id = ${user.id}`;
 
-        const session = await createCircleSession(String(user.id));
+        const session = await createCircleSession(user.email || String(user.id));
 
         console.log(`[ReAuth Session] Created session for ${user.username}`);
 
