@@ -274,13 +274,16 @@ export const TelegramWelcome: React.FC<TelegramWelcomeProps> = ({ onComplete }) 
                             <p className="text-white/50 text-sm">Enter the 6-digit code sent to <span className="text-blue-400">{email}</span></p>
                         </div>
                         <div className="w-full space-y-3">
-                            <input
-                                type="number"
-                                value={otp}
-                                onChange={(e) => setOtp(e.target.value)}
-                                placeholder="000000"
-                                className="w-full px-4 py-4 rounded-2xl bg-white/5 border border-white/10 text-white placeholder-white/30 text-2xl text-center font-bold tracking-widest focus:outline-none focus:border-blue-500"
-                            />
+                           <input
+    type="text"
+    inputMode="numeric"
+    pattern="[0-9]*"
+    value={otp}
+    onChange={(e) => setOtp(e.target.value.replace(/\D/g, ''))}
+    placeholder="000000"
+    maxLength={6}
+    className="w-full px-4 py-4 rounded-2xl bg-white/5 border border-white/10 text-white placeholder-white/30 text-2xl text-center font-bold tracking-widest focus:outline-none focus:border-blue-500"
+/>
                             <button onClick={handleVerifyOtp} disabled={otp.length < 6} className="w-full py-4 rounded-2xl bg-gradient-to-r from-blue-500 to-indigo-600 text-white font-bold text-base shadow-lg shadow-blue-500/30 active:scale-95 transition-transform disabled:opacity-50">
                                 Verify & Link Account →
                             </button>
