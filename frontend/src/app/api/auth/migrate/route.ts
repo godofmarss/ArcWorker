@@ -14,6 +14,7 @@ export async function POST(request: Request) {
         // Add otp columns
         await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS otp_code VARCHAR(10)`;
         await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS otp_expires_at TIMESTAMP`;
+        await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS telegram_wallet_address VARCHAR(100)`;
 
         return NextResponse.json({ success: true, message: 'Migration complete' });
     } catch (error: any) {
