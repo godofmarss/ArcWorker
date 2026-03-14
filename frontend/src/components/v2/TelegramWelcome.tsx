@@ -52,17 +52,11 @@ export const TelegramWelcome: React.FC<TelegramWelcomeProps> = ({ onComplete }) 
     }, []);
 
     const handleGetStarted = async () => {
-        if (!tgUser) {
-    // Try reading directly from Telegram WebApp as fallback
-    const tg = (window as any).Telegram?.WebApp;
-    const fallbackUser = tg?.initDataUnsafe?.user;
-    if (fallbackUser) {
-        setTgUser(fallbackUser);
-    } else {
-        setErrorMsg('Could not read Telegram user data. Please restart the app.');
-        setStep('error');
-        return;
-    }
+        const currentUser = tgUser || (window as any).Telegram?.WebApp?.initDataUnsafe?.user;
+if (!currentUser) {
+    setErrorMsg('Could not read Telegram user data. Please restart the app.');
+    setStep('error');
+    return;
 }
 
         setStep('loading');
@@ -75,9 +69,9 @@ export const TelegramWelcome: React.FC<TelegramWelcomeProps> = ({ onComplete }) 
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    telegramId: tgUser.id.toString(),
-                    telegramUsername: tgUser.username || `user_${tgUser.id}`,
-                    telegramName: [tgUser.first_name, tgUser.last_name].filter(Boolean).join(' '),
+                    telegramId: currentUser.id.toString(),
+telegramUsername: currentUser.username || `user_${currentUser.id}`,
+telegramName: [currentUser.first_name, currentUser.last_name].filter(Boolean).join(' '),
                     initData,
                 }),
             });
