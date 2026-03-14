@@ -63,7 +63,7 @@ useEffect(() => {
                 // dev_circle users don't need a session token
                 if (user.walletType === 'dev_circle') return true;
                 // regular circle users need a session token
-                if (sessionToken && user.walletType === 'circle') return true;
+                if (user.walletType === 'circle') return true;
             } catch (e) { return false; }
         }
         return false;
@@ -213,12 +213,13 @@ const { data: wagmiBalanceData, isLoading: isWagmiBalanceLoading, refetch: refet
                     if (user.walletType === 'dev_circle') {
                         setIsCircle(true);
                         setCircleAddress(user.walletAddress || user.address || null);
-                    } else if (sessionToken && user.walletType === 'circle') {
-                        setIsCircle(true);
-                        setCircleAddress(user.address || null);
-                    } else {
-                        setIsCircle(false);
-                    }
+                    } else if (user.walletType === 'circle') {
+    // Allow circle wallet users even without session token (linked Telegram accounts)
+    setIsCircle(true);
+    setCircleAddress(user.walletAddress || user.address || null);
+} else {
+    setIsCircle(false);
+}
                 } catch (e) {
                     setIsCircle(false);
                     setCircleAddress(null);
