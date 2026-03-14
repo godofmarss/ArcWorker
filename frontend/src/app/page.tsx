@@ -10,9 +10,13 @@ import { TelegramWelcome } from '@/components/v2/TelegramWelcome';
 
 // Detect if running inside Telegram Mini App
 function isTelegramMiniApp(): boolean {
-    if (typeof window === 'undefined') return false;
-    const tg = (window as any).Telegram?.WebApp;
-    return !!(tg && tg.initData && tg.initData.length > 0);
+    try {
+        if (typeof window === 'undefined') return false;
+        const tg = (window as any).Telegram?.WebApp;
+        return !!(tg && tg.initData && tg.initData.length > 0);
+    } catch (e) {
+        return false;
+    }
 }
 
 export default function DesignPreview() {
@@ -26,6 +30,7 @@ export default function DesignPreview() {
     const [telegramReady, setTelegramReady] = useState(false);
 
     useEffect(() => {
+    try {
     const tgDetected = isTelegramMiniApp();
     setIsTelegram(tgDetected);
 
@@ -49,6 +54,7 @@ export default function DesignPreview() {
     }
 
     setTelegramReady(true);
+    } catch(e) { setTelegramReady(true); }
 }, [isConnected]);
 
     const openAuth = (mode: 'register' | 'login', role?: 'worker' | 'agency') => {
