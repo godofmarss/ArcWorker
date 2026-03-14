@@ -24,7 +24,8 @@ export const TelegramWelcome: React.FC<TelegramWelcomeProps> = ({ onComplete }) 
     const [pendingTgData, setPendingTgData] = useState<any>(null);
 
     useEffect(() => {
-        const tg = (window as any).Telegram?.WebApp;
+    const init = () => {
+    const tg = (window as any).Telegram?.WebApp;
         if (tg) {
             tg.ready();
             tg.expand();
@@ -46,14 +47,23 @@ export const TelegramWelcome: React.FC<TelegramWelcomeProps> = ({ onComplete }) 
                 } catch (e) {}
             }
         }
+    };
+    setTimeout(init, 500);
     }, []);
 
     const handleGetStarted = async () => {
         if (!tgUser) {
-            setErrorMsg('Could not read Telegram user data. Please restart the app.');
-            setStep('error');
-            return;
-        }
+    // Try reading directly from Telegram WebApp as fallback
+    const tg = (window as any).Telegram?.WebApp;
+    const fallbackUser = tg?.initDataUnsafe?.user;
+    if (fallbackUser) {
+        setTgUser(fallbackUser);
+    } else {
+        setErrorMsg('Could not read Telegram user data. Please restart the app.');
+        setStep('error');
+        return;
+    }
+}
 
         setStep('loading');
 
