@@ -48,19 +48,30 @@ export async function POST(request: Request) {
 
         console.log(`[Verify OTP] Linked Telegram ${telegramId} to user ${user.username}`);
 
-        return NextResponse.json({
-            success: true,
-            message: 'Accounts linked successfully!',
-            user: {
-                id: user.id,
-                username: user.username,
-                email: user.email,
-                role: user.role,
-                walletAddress: user.wallet_address,
-                walletType: user.wallet_type || 'circle',
-                telegramId,
-            }
-        });
+        // Create Circle session for the linked user
+let circleSession = null;
+try {
+    const { createCircleSession } = await import('@/arcworker-sdk/wallet/server');
+    circleSession = await createCircleSession(user.id);
+} catch (e) {
+    console.error('[Verify OTP] Could not create Circle session:', e);
+}
+
+return NextResponse.json({
+    success: true,
+    message: 'Accounts linked successfully!',
+    user: {
+        id: user.id,
+        username: user.username,
+        email: user.email,
+        role: user.role,
+        walletAddress: user.wallet_address,
+        walletType: user.wallet_type || 'circle',
+        telegramId,
+    },
+    circleSession,
+    walletAddress: user.wallet_address,
+});
 
     } catch (error: any) {
         console.error('[Verify OTP] Error:', error.message);
