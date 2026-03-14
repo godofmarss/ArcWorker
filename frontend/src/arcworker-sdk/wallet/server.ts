@@ -245,7 +245,14 @@ export async function findFundedWallet(userToken: string, requiredAmount: string
 
         try {
             const balances = await getCircleBalances(userToken, wallet.id);
-            const native = balances.find((b: any) => b.token?.isNative || b.token?.symbol === 'ETH' || b.token?.symbol === 'MATIC');
+            const native = balances.find((b: any) => b.token?.isconst anyToken = balances.find((b: any) => 
+    b.token?.isNative || 
+    b.token?.symbol === 'ETH' || 
+    b.token?.symbol === 'MATIC' ||
+    b.token?.symbol === 'USDC' ||
+    b.token?.symbol === 'ARC'
+);
+const amount = parseFloat(anyToken?.amount || '0'); || b.token?.symbol === 'ETH' || b.token?.symbol === 'MATIC');
             const amount = parseFloat(native?.amount || '0');
 
             console.log(` -> Wallet: ${wallet.address.substring(0, 10)}... | Balance: ${amount} | ID: ${wallet.id}`);
