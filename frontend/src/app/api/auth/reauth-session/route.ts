@@ -11,7 +11,7 @@ export async function POST(request: Request) {
         }
 
         const result = await sql`
-    SELECT id, username, email, otp_code, otp_expires_at
+    SELECT id, username, email, user_id, otp_code, otp_expires_at
     FROM users WHERE email = ${email.toLowerCase()}
 `;
 
@@ -31,7 +31,9 @@ export async function POST(request: Request) {
 
         await sql`UPDATE users SET otp_code = NULL, otp_expires_at = NULL WHERE id = ${user.id}`;
 
-        const session = await createCircleSession(user.email || String(user.id));
+        const circleUserId = user.user_id || user.email || String(user.id);
+console.log(`[ReAuth] Creating session for Circle ID: ${circleUserId}`);
+const session = await createCircleSession(circleUserId);
 
         console.log(`[ReAuth Session] Created session for ${user.username}`);
 
