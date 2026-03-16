@@ -365,18 +365,18 @@ export const WorkerTaskFeed: React.FC<WorkerTaskFeedProps> = ({ onBack }) => {
                 });
                 const data = await res.json();
                 if (data.error) throw new Error(data.error);
-                if (data.challengeId) {
-                    const sdk = getSdk();
-                    if (!sdk) throw new Error("Circle SDK not initialized");
-                    sdk.setAppSettings({ appId: data.appId });
-                    sdk.setAuthentication({ userToken: data.userToken, encryptionKey: data.encryptionKey });
-                    await new Promise((resolve, reject) => {
-                        sdk.execute(data.challengeId, (error: any, result: any) => {
-                            if (error) reject(error);
-                            else resolve(result);
-                        });
-                    });
-                }
+                if (data.challengeId && user.walletType !== 'dev_circle') {
+    const sdk = getSdk();
+    if (!sdk) throw new Error("Circle SDK not initialized");
+    sdk.setAppSettings({ appId: data.appId });
+    sdk.setAuthentication({ userToken: data.userToken, encryptionKey: data.encryptionKey });
+    await new Promise((resolve, reject) => {
+        sdk.execute(data.challengeId, (error: any, result: any) => {
+            if (error) reject(error);
+            else resolve(result);
+        });
+    });
+}
                 alert("Task submitted successfully via Circle!");
                 if (selectedTask.verification !== 'Manual Review') triggerAutoVerify(selectedTask.id);
                 setRecentlySubmitted(prev => {
