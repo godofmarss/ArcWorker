@@ -76,6 +76,33 @@ export default function WalletDashboardModal({ isOpen, onClose, externalSavingsB
         }
         return null;
     });
+    // Telegram wallet address for linked web users
+const [telegramWalletAddress, setTelegramWalletAddress] = useState<string | null>(() => {
+    if (typeof window === 'undefined') return null;
+    const savedUser = localStorage.getItem('arc_user');
+    if (savedUser) {
+        try {
+            const user = JSON.parse(savedUser);
+            return user.telegramWalletAddress || localStorage.getItem('arc_telegram_wallet_address') || null;
+        } catch (e) { return null; }
+    }
+    return null;
+});
+
+// Active wallet: 'web' or 'telegram'
+const [activeWallet, setActiveWallet] = useState<'web' | 'telegram'>(() => {
+    if (typeof window === 'undefined') return 'web';
+    const savedUser = localStorage.getItem('arc_user');
+    if (savedUser) {
+        try {
+            const user = JSON.parse(savedUser);
+            if (user.walletType === 'dev_circle') return 'telegram';
+        } catch (e) {}
+    }
+    return 'web';
+});
+
+const [isTransferring, setIsTransferring] = useState(false);
 
     const [circleBalance, setCircleBalance] = useState<string>('0.00');
     const [isCircleBalanceLoading, setIsCircleBalanceLoading] = useState(false);
@@ -95,8 +122,10 @@ export default function WalletDashboardModal({ isOpen, onClose, externalSavingsB
     const [reauthStep, setReauthStep] = useState<'email' | 'otp' | 'loading'>('email');
     const [reauthError, setReauthError] = useState('');
 
-    const address = isCircle ? circleAddress : wagmiAddress;
-    const isConnected = isCircle ? !!circleAddress : wagmiConnected;
+    const webAddress = isCircle ? circleAddress : wagmiAddress;
+const tgAddress = telegramWalletAddress;
+const address = activeWallet === 'telegram' && tgAddress ? tgAddress : webAddress;
+const isConnected = isCircle ? !!(circleAddress || telegramWalletAddress) : wagmiConnected;
 
     const [isWorker, setIsWorker] = useState(false);
     useEffect(() => {
@@ -205,13 +234,16 @@ export default function WalletDashboardModal({ isOpen, onClose, externalSavingsB
             const sessionToken = localStorage.getItem('arc_session_token');
             if (savedUser) {
                 try {
-                    const user = JSON.parse(savedUser);
-                    if (user.walletType === 'dev_circle') {
-                        setIsCircle(true);
-                        setCircleAddress(user.walletAddress || user.address || null);
-                        setNeedsReauth(false);
-                    } else if (user.walletType === 'circle') {
-                        setIsCircle(true);
+                   const user = JSON.parse(savedUser);
+if (user.walletType === 'dev_circle') {
+    setIsCircle(true);
+    setCircleAddress(user.walletAddress || user.address || null);
+    setTelegramWalletAddress(user.telegramWalletAddress || localStorage.getItem('arc_telegram_wallet_address') || null);
+    setNeedsReauth(false);
+} else if (user.walletType === 'circle') {
+    setIsCircle(true);
+    setCircleAddress(user.walletAddress || user.address || null);
+    setTelegramWalletAddress(user.telegramWalletAddress || localStorage.getItem('arc_telegram_wallet_address') || null);
                         setCircleAddress(user.walletAddress || user.address || null);
                         // Flag linked Telegram users with no session token for reauth
                         if (!sessionToken) {
@@ -761,6 +793,18 @@ window.location.reload();
                             <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">Total Wallet Balance</p>
                             <h2 className="text-5xl font-black text-slate-900 mb-2 tracking-tight">${liquidDisplay}</h2>
 
+{/* Wallet Switcher — only show for linked users with both wallets */}
+{telegramWalletAddress && circleAddress && (
+    <div className="flex gap-2 justify-center mt-3 mb-2">
+        <button onClick={() => setActiveWallet('web')} className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all ${activeWallet === 'web' ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-500'}`}>
+            🌐 Web Wallet
+        </button>
+        <button onClick={() => setActiveWallet('telegram')} className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all ${activeWallet === 'telegram' ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-500'}`}>
+            📱 Telegram Wallet
+        </button>
+    </div>
+)}
+
                             <div className="mt-8 space-y-3">
                                 <div className="p-4 rounded-2xl border border-slate-100 flex items-center justify-between hover:bg-slate-50 transition-colors cursor-pointer group">
                                     <div className="flex items-center">
@@ -773,6 +817,37 @@ window.location.reload();
                                     <span className="font-bold text-slate-700">{liquidDisplay}</span>
                                 </div>
 
+                                {/* Transfer between wallets — only for linked users */}
+{telegramWalletAddress && circleAddress && (
+    <button
+        onClick={async () => {
+            const savedUser = localStorage.getItem('arc_user');
+            const user = savedUser ? JSON.parse(savedUser) : {};
+            const from = activeWallet === 'web' ? circleAddress : telegramWalletAddress;
+            const to = activeWallet === 'web' ? telegramWalletAddress : circleAddress;
+            const transferAmount = prompt(`Transfer how much USDC from ${activeWallet === 'web' ? 'Web' : 'Telegram'} wallet to ${activeWallet === 'web' ? 'Telegram' : 'Web'} wallet?`);
+            if (!transferAmount) return;
+            setIsTransferring(true);
+            try {
+                if (activeWallet === 'telegram' || user.walletType === 'dev_circle') {
+                    await axios.post('/api/circle/transfer', { fromAddress: from, toAddress: to, amount: transferAmount, isDev: true });
+                } else {
+                    await axios.post('/api/circle/transfer', { toAddress: to, amount: transferAmount, userToken: localStorage.getItem('arc_session_token') });
+                }
+                alert(`✅ Transfer of ${transferAmount} USDC initiated!`);
+                setTimeout(() => refetchWagmiBalance(), 3000);
+            } catch (e: any) {
+                alert('Transfer failed: ' + e.message);
+            } finally {
+                setIsTransferring(false);
+            }
+        }}
+        disabled={isTransferring}
+        className="w-full p-3 rounded-2xl border border-blue-200 bg-blue-50 text-blue-700 text-xs font-bold hover:bg-blue-100 transition-colors disabled:opacity-50"
+    >
+        {isTransferring ? '↻ Transferring...' : `⇄ Transfer to ${activeWallet === 'web' ? '📱 Telegram' : '🌐 Web'} Wallet`}
+    </button>
+)}
                                 {Number(savingsAssets) > 0 && (
                                     <div className="p-4 rounded-2xl bg-blue-50 border border-blue-100 flex flex-col space-y-3 animate-in fade-in slide-in-from-bottom-2 duration-700">
                                         <div className="flex items-center justify-between">
