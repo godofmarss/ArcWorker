@@ -737,11 +737,17 @@ export default function WalletDashboardModal({ isOpen, onClose, externalSavingsB
                                             if (!transferAmount) return;
                                             setIsTransferring(true);
                                             try {
-                                                if (activeWallet === 'telegram' || user.walletType === 'dev_circle') {
-                                                    await axios.post('/api/circle/transfer', { fromAddress: from, toAddress: to, amount: transferAmount, isDev: true });
-                                                } else {
-                                                    await axios.post('/api/circle/transfer', { toAddress: to, amount: transferAmount, userToken: localStorage.getItem('arc_session_token') });
-                                                }
+                                                const isTelegram = !!(window as any).Telegram?.WebApp?.initData;
+if (activeWallet === 'web' && isTelegram) {
+    alert('To transfer from your Web wallet to Telegram wallet, please visit arc-worker-neon.vercel.app on your browser.');
+    setIsTransferring(false);
+    return;
+}
+if (activeWallet === 'telegram' || user.walletType === 'dev_circle') {
+    await axios.post('/api/circle/transfer', { fromAddress: from, toAddress: to, amount: transferAmount, isDev: true });
+} else {
+    await sendCircleTransfer(to as string, transferAmount, 'USDC', 'Transfer to Telegram wallet');
+}
                                                 alert(`✅ Transfer of ${transferAmount} USDC initiated!`);
                                                 setTimeout(() => refetchWagmiBalance(), 3000);
                                             } catch (e: any) {
