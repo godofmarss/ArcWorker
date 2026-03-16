@@ -647,12 +647,11 @@ export default function WalletDashboardModal({ isOpen, onClose, externalSavingsB
                                         });
                                         if (!verifyRes.data.success) throw new Error(verifyRes.data.error);
                                         localStorage.setItem('arc_session_token', verifyRes.data.userToken);
-                                        if (verifyRes.data.encryptionKey) {
-                                            localStorage.setItem('arc_encryption_key', verifyRes.data.encryptionKey);
-                                        }
-                                        setNeedsReauth(false);
-                                        setReauthOtp('');
-                                        setReauthStep('email');
+if (verifyRes.data.encryptionKey) {
+    localStorage.setItem('arc_encryption_key', verifyRes.data.encryptionKey);
+}
+// Reload to reinitialize Circle SDK with new session token
+window.location.reload();
                                     } catch (e: any) {
                                         setReauthError(e.message || 'Verification failed');
                                         setReauthStep('otp');
