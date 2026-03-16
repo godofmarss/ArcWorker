@@ -76,34 +76,32 @@ export default function WalletDashboardModal({ isOpen, onClose, externalSavingsB
         }
         return null;
     });
-    // Telegram wallet address for linked web users
-const [telegramWalletAddress, setTelegramWalletAddress] = useState<string | null>(() => {
-    if (typeof window === 'undefined') return null;
-    const savedUser = localStorage.getItem('arc_user');
-    if (savedUser) {
-        try {
-            const user = JSON.parse(savedUser);
-            return user.telegramWalletAddress || localStorage.getItem('arc_telegram_wallet_address') || null;
-        } catch (e) { return null; }
-    }
-    return null;
-});
 
-// Active wallet: 'web' or 'telegram'
-const [activeWallet, setActiveWallet] = useState<'web' | 'telegram'>(() => {
-    if (typeof window === 'undefined') return 'web';
-    const savedUser = localStorage.getItem('arc_user');
-    if (savedUser) {
-        try {
-            const user = JSON.parse(savedUser);
-            if (user.walletType === 'dev_circle') return 'telegram';
-        } catch (e) {}
-    }
-    return 'web';
-});
+    const [telegramWalletAddress, setTelegramWalletAddress] = useState<string | null>(() => {
+        if (typeof window === 'undefined') return null;
+        const savedUser = localStorage.getItem('arc_user');
+        if (savedUser) {
+            try {
+                const user = JSON.parse(savedUser);
+                return user.telegramWalletAddress || localStorage.getItem('arc_telegram_wallet_address') || null;
+            } catch (e) { return null; }
+        }
+        return null;
+    });
 
-const [isTransferring, setIsTransferring] = useState(false);
+    const [activeWallet, setActiveWallet] = useState<'web' | 'telegram'>(() => {
+        if (typeof window === 'undefined') return 'web';
+        const savedUser = localStorage.getItem('arc_user');
+        if (savedUser) {
+            try {
+                const user = JSON.parse(savedUser);
+                if (user.walletType === 'dev_circle') return 'telegram';
+            } catch (e) {}
+        }
+        return 'web';
+    });
 
+    const [isTransferring, setIsTransferring] = useState(false);
     const [circleBalance, setCircleBalance] = useState<string>('0.00');
     const [isCircleBalanceLoading, setIsCircleBalanceLoading] = useState(false);
     const [isCircleSending, setIsCircleSending] = useState(false);
@@ -115,17 +113,10 @@ const [isTransferring, setIsTransferring] = useState(false);
     const [isDevSending, setIsDevSending] = useState(false);
     const [isRefreshing, setIsRefreshing] = useState(false);
 
-    // Reauth states for linked Circle wallet users with no session token
-    const [needsReauth, setNeedsReauth] = useState(false);
-    const [reauthEmail, setReauthEmail] = useState('');
-    const [reauthOtp, setReauthOtp] = useState('');
-    const [reauthStep, setReauthStep] = useState<'email' | 'otp' | 'loading'>('email');
-    const [reauthError, setReauthError] = useState('');
-
     const webAddress = isCircle ? circleAddress : wagmiAddress;
-const tgAddress = telegramWalletAddress;
-const address = activeWallet === 'telegram' && tgAddress ? tgAddress : webAddress;
-const isConnected = isCircle ? !!(circleAddress || telegramWalletAddress) : wagmiConnected;
+    const tgAddress = telegramWalletAddress;
+    const address = activeWallet === 'telegram' && tgAddress ? tgAddress : (webAddress as string | null);
+    const isConnected = isCircle ? !!(circleAddress || telegramWalletAddress) : wagmiConnected;
 
     const [isWorker, setIsWorker] = useState(false);
     useEffect(() => {
@@ -138,7 +129,7 @@ const isConnected = isCircle ? !!(circleAddress || telegramWalletAddress) : wagm
         }
     }, []);
 
-    const balanceAddress = (isCircle ? circleAddress : wagmiAddress) as `0x${string}` | undefined;
+    const balanceAddress = (address) as `0x${string}` | undefined;
     const { data: wagmiBalanceData, isLoading: isWagmiBalanceLoading, refetch: refetchWagmiBalance } = useBalance({
         address: balanceAddress,
         query: { enabled: !!balanceAddress }
@@ -231,46 +222,40 @@ const isConnected = isCircle ? !!(circleAddress || telegramWalletAddress) : wagm
     useEffect(() => {
         const checkSession = () => {
             const savedUser = localStorage.getItem('arc_user');
-            const sessionToken = localStorage.getItem('arc_session_token');
             if (savedUser) {
                 try {
-                   const user = JSON.parse(savedUser);
-if (user.walletType === 'dev_circle') {
-    setIsCircle(true);
-    setCircleAddress(user.walletAddress || user.address || null);
-    setTelegramWalletAddress(user.telegramWalletAddress || localStorage.getItem('arc_telegram_wallet_address') || null);
-    setNeedsReauth(false);
-} else if (user.walletType === 'circle') {
-    setIsCircle(true);
-    setCircleAddress(user.walletAddress || user.address || null);
-    setTelegramWalletAddress(user.telegramWalletAddress || localStorage.getItem('arc_telegram_wallet_address') || null);
+                    const user = JSON.parse(savedUser);
+                    const tgWallet = user.telegramWalletAddress || localStorage.getItem('arc_telegram_wallet_address') || null;
+
+                    if (user.walletType === 'dev_circle') {
+                        setIsCircle(true);
                         setCircleAddress(user.walletAddress || user.address || null);
-                        // Flag linked Telegram users with no session token for reauth
-                        if (!sessionToken) {
-                            setNeedsReauth(true);
-                            setReauthEmail(user.email || '');
-                        } else {
-                            setNeedsReauth(false);
+                        setTelegramWalletAddress(tgWallet);
+                        setActiveWallet('telegram');
+                    } else if (user.walletType === 'circle') {
+                        setIsCircle(true);
+                        setCircleAddress(user.walletAddress || user.address || null);
+                        setTelegramWalletAddress(tgWallet);
+                        // If on Telegram and has TG wallet, default to telegram wallet
+                        if (tgWallet && !(window as any).Telegram?.WebApp?.initData) {
+                            setActiveWallet('web');
+                        } else if (tgWallet) {
+                            setActiveWallet('telegram');
                         }
                     } else {
                         setIsCircle(false);
-                        setNeedsReauth(false);
                     }
                 } catch (e) {
                     setIsCircle(false);
                     setCircleAddress(null);
-                    setNeedsReauth(false);
                 }
             } else {
                 setIsCircle(false);
                 setCircleAddress(null);
-                setNeedsReauth(false);
             }
         };
 
-        if (isOpen) {
-            checkSession();
-        }
+        if (isOpen) checkSession();
     }, [isOpen]);
 
     const fetchCircleBalance = React.useCallback(async () => {
@@ -408,9 +393,11 @@ if (user.walletType === 'dev_circle') {
                 const savedUser = localStorage.getItem('arc_user');
                 const user = savedUser ? JSON.parse(savedUser) : {};
 
-                if (user.walletType === 'dev_circle') {
+                // Telegram wallet or active wallet is telegram — use server-side transfer
+                if (user.walletType === 'dev_circle' || activeWallet === 'telegram') {
+                    const fromAddr = activeWallet === 'telegram' ? telegramWalletAddress : circleAddress;
                     const res = await axios.post('/api/circle/transfer', {
-                        fromAddress: address,
+                        fromAddress: fromAddr,
                         toAddress: target,
                         amount,
                         isDev: true,
@@ -418,7 +405,7 @@ if (user.walletType === 'dev_circle') {
                     const data = res.data;
                     if (data.error) throw new Error(data.error);
                     await axios.post('/api/social/payment', {
-                        fromAddress: address,
+                        fromAddress: fromAddr,
                         toAddress: target,
                         amount,
                         symbol: 'USDC',
@@ -513,8 +500,8 @@ if (user.walletType === 'dev_circle') {
                     }
                 }
 
-                if (user.walletType === 'dev_circle') {
-                    const walletAddr = user.walletAddress || user.address;
+                if (user.walletType === 'dev_circle' || activeWallet === 'telegram') {
+                    const walletAddr = activeWallet === 'telegram' ? telegramWalletAddress : (user.walletAddress || user.address);
                     const { data } = await axios.post('/api/circle/contract/register-name', {
                         username,
                         walletAddress: walletAddr,
@@ -605,102 +592,15 @@ if (user.walletType === 'dev_circle') {
     const isAddressValid = resolvedAddress || (recipient.startsWith('0x') && recipient.length === 42);
     const isConnectorError = typeof sendError !== 'string' && (sendError as any)?.message?.includes('Connector not connected');
 
+    // Check if web wallet send is disabled (linked circle user on Telegram)
+    const savedUserRaw = typeof window !== 'undefined' ? localStorage.getItem('arc_user') : null;
+    const savedUserObj = savedUserRaw ? (() => { try { return JSON.parse(savedUserRaw); } catch { return {}; } })() : {};
+    const isLinkedCircleOnTelegram = savedUserObj.walletType === 'circle' && 
+        activeWallet === 'web' && 
+        !localStorage.getItem('arc_session_token') &&
+        !!(window as any).Telegram?.WebApp?.initData;
+
     if (!isOpen) return null;
-
-    // Reauth screen for linked Circle wallet users with no session token
-    if (isConnected && needsReauth) {
-        return (
-            <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in">
-                <div className="bg-white rounded-3xl w-full max-w-sm overflow-hidden shadow-2xl p-8 relative">
-                    <button onClick={onClose} className="absolute top-4 right-4 w-8 h-8 flex items-center justify-center bg-slate-100 text-slate-500 rounded-full hover:bg-slate-200">✕</button>
-                    <div className="text-center mb-6">
-                        <div className="w-14 h-14 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center mx-auto mb-4 text-2xl">🔐</div>
-                        <h3 className="font-bold text-slate-900 text-lg">Verify Your Identity</h3>
-                        <p className="text-slate-500 text-sm mt-1">Enter the code sent to your email to activate your wallet session.</p>
-                    </div>
-
-                    {reauthStep === 'email' && (
-                        <div className="space-y-3">
-                            <input
-                                type="email"
-                                value={reauthEmail}
-                                onChange={(e) => setReauthEmail(e.target.value)}
-                                placeholder="your@email.com"
-                                className="w-full px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 text-slate-900 text-sm font-bold focus:outline-none focus:border-blue-500"
-                            />
-                            {reauthError && <p className="text-red-500 text-xs">{reauthError}</p>}
-                            <button
-                                onClick={async () => {
-                                    setReauthStep('loading');
-                                    setReauthError('');
-                                    try {
-                                        const res = await axios.post('/api/auth/send-otp', { email: reauthEmail });
-                                        if (res.data.success) setReauthStep('otp');
-                                        else throw new Error(res.data.error);
-                                    } catch (e: any) {
-                                        setReauthError(e.message || 'Failed to send code');
-                                        setReauthStep('email');
-                                    }
-                                }}
-                                className="w-full py-3 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 transition-all"
-                            >
-                                Send Verification Code
-                            </button>
-                        </div>
-                    )}
-
-                    {reauthStep === 'loading' && (
-                        <div className="flex items-center justify-center py-8">
-                            <div className="w-8 h-8 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
-                        </div>
-                    )}
-
-                    {reauthStep === 'otp' && (
-                        <div className="space-y-3">
-                            <input
-                                type="text"
-                                inputMode="numeric"
-                                pattern="[0-9]*"
-                                value={reauthOtp}
-                                onChange={(e) => setReauthOtp(e.target.value.replace(/\D/g, ''))}
-                                placeholder="000000"
-                                maxLength={6}
-                                className="w-full px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 text-slate-900 text-2xl font-bold text-center tracking-widest focus:outline-none focus:border-blue-500"
-                            />
-                            {reauthError && <p className="text-red-500 text-xs">{reauthError}</p>}
-                            <button
-                                onClick={async () => {
-                                    setReauthStep('loading');
-                                    setReauthError('');
-                                    try {
-                                        const verifyRes = await axios.post('/api/auth/reauth-session', {
-                                            email: reauthEmail,
-                                            otp: reauthOtp,
-                                        });
-                                        if (!verifyRes.data.success) throw new Error(verifyRes.data.error);
-                                        localStorage.setItem('arc_session_token', verifyRes.data.userToken);
-if (verifyRes.data.encryptionKey) {
-    localStorage.setItem('arc_encryption_key', verifyRes.data.encryptionKey);
-}
-// Reload to reinitialize Circle SDK with new session token
-window.location.reload();
-                                    } catch (e: any) {
-                                        setReauthError(e.message || 'Verification failed');
-                                        setReauthStep('otp');
-                                    }
-                                }}
-                                disabled={reauthOtp.length < 6}
-                                className="w-full py-3 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 transition-all disabled:opacity-50"
-                            >
-                                Verify & Activate Wallet
-                            </button>
-                            <button onClick={() => { setReauthOtp(''); setReauthStep('email'); }} className="w-full py-2 text-slate-400 text-sm">← Resend code</button>
-                        </div>
-                    )}
-                </div>
-            </div>
-        );
-    }
 
     if (!isConnected || !address) {
         return (
@@ -790,22 +690,30 @@ window.location.reload();
                 <div className="flex-1 p-6 relative flex flex-col min-h-[550px]">
                     {activeTab === 'ASSETS' && (
                         <div className="text-center py-8 flex-1">
-                            <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">Total Wallet Balance</p>
+                            <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">
+                                {activeWallet === 'telegram' ? '📱 Telegram Wallet' : '🌐 Web Wallet'} Balance
+                            </p>
                             <h2 className="text-5xl font-black text-slate-900 mb-2 tracking-tight">${liquidDisplay}</h2>
 
-{/* Wallet Switcher — only show for linked users with both wallets */}
-{telegramWalletAddress && circleAddress && (
-    <div className="flex gap-2 justify-center mt-3 mb-2">
-        <button onClick={() => setActiveWallet('web')} className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all ${activeWallet === 'web' ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-500'}`}>
-            🌐 Web Wallet
-        </button>
-        <button onClick={() => setActiveWallet('telegram')} className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all ${activeWallet === 'telegram' ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-500'}`}>
-            📱 Telegram Wallet
-        </button>
-    </div>
-)}
+                            {/* Wallet Switcher — only show for linked users with both wallets */}
+                            {telegramWalletAddress && circleAddress && (
+                                <div className="flex gap-2 justify-center mt-3 mb-2">
+                                    <button
+                                        onClick={() => setActiveWallet('web')}
+                                        className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all ${activeWallet === 'web' ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-500'}`}
+                                    >
+                                        🌐 Web Wallet
+                                    </button>
+                                    <button
+                                        onClick={() => setActiveWallet('telegram')}
+                                        className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all ${activeWallet === 'telegram' ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-500'}`}
+                                    >
+                                        📱 Telegram Wallet
+                                    </button>
+                                </div>
+                            )}
 
-                            <div className="mt-8 space-y-3">
+                            <div className="mt-6 space-y-3">
                                 <div className="p-4 rounded-2xl border border-slate-100 flex items-center justify-between hover:bg-slate-50 transition-colors cursor-pointer group">
                                     <div className="flex items-center">
                                         <div className="w-10 h-10 bg-[#2775ca] rounded-full flex items-center justify-center text-white font-bold text-lg shadow-lg shadow-blue-500/20 group-hover:scale-110 transition-transform">$</div>
@@ -817,37 +725,38 @@ window.location.reload();
                                     <span className="font-bold text-slate-700">{liquidDisplay}</span>
                                 </div>
 
-                                {/* Transfer between wallets — only for linked users */}
-{telegramWalletAddress && circleAddress && (
-    <button
-        onClick={async () => {
-            const savedUser = localStorage.getItem('arc_user');
-            const user = savedUser ? JSON.parse(savedUser) : {};
-            const from = activeWallet === 'web' ? circleAddress : telegramWalletAddress;
-            const to = activeWallet === 'web' ? telegramWalletAddress : circleAddress;
-            const transferAmount = prompt(`Transfer how much USDC from ${activeWallet === 'web' ? 'Web' : 'Telegram'} wallet to ${activeWallet === 'web' ? 'Telegram' : 'Web'} wallet?`);
-            if (!transferAmount) return;
-            setIsTransferring(true);
-            try {
-                if (activeWallet === 'telegram' || user.walletType === 'dev_circle') {
-                    await axios.post('/api/circle/transfer', { fromAddress: from, toAddress: to, amount: transferAmount, isDev: true });
-                } else {
-                    await axios.post('/api/circle/transfer', { toAddress: to, amount: transferAmount, userToken: localStorage.getItem('arc_session_token') });
-                }
-                alert(`✅ Transfer of ${transferAmount} USDC initiated!`);
-                setTimeout(() => refetchWagmiBalance(), 3000);
-            } catch (e: any) {
-                alert('Transfer failed: ' + e.message);
-            } finally {
-                setIsTransferring(false);
-            }
-        }}
-        disabled={isTransferring}
-        className="w-full p-3 rounded-2xl border border-blue-200 bg-blue-50 text-blue-700 text-xs font-bold hover:bg-blue-100 transition-colors disabled:opacity-50"
-    >
-        {isTransferring ? '↻ Transferring...' : `⇄ Transfer to ${activeWallet === 'web' ? '📱 Telegram' : '🌐 Web'} Wallet`}
-    </button>
-)}
+                                {/* Transfer between wallets — only for linked users with both wallets */}
+                                {telegramWalletAddress && circleAddress && (
+                                    <button
+                                        onClick={async () => {
+                                            const savedUser = localStorage.getItem('arc_user');
+                                            const user = savedUser ? JSON.parse(savedUser) : {};
+                                            const from = activeWallet === 'web' ? circleAddress : telegramWalletAddress;
+                                            const to = activeWallet === 'web' ? telegramWalletAddress : circleAddress;
+                                            const transferAmount = prompt(`Transfer how much USDC from ${activeWallet === 'web' ? 'Web' : 'Telegram'} wallet to ${activeWallet === 'web' ? 'Telegram' : 'Web'} wallet?`);
+                                            if (!transferAmount) return;
+                                            setIsTransferring(true);
+                                            try {
+                                                if (activeWallet === 'telegram' || user.walletType === 'dev_circle') {
+                                                    await axios.post('/api/circle/transfer', { fromAddress: from, toAddress: to, amount: transferAmount, isDev: true });
+                                                } else {
+                                                    await axios.post('/api/circle/transfer', { toAddress: to, amount: transferAmount, userToken: localStorage.getItem('arc_session_token') });
+                                                }
+                                                alert(`✅ Transfer of ${transferAmount} USDC initiated!`);
+                                                setTimeout(() => refetchWagmiBalance(), 3000);
+                                            } catch (e: any) {
+                                                alert('Transfer failed: ' + e.message);
+                                            } finally {
+                                                setIsTransferring(false);
+                                            }
+                                        }}
+                                        disabled={isTransferring}
+                                        className="w-full p-3 rounded-2xl border border-blue-200 bg-blue-50 text-blue-700 text-xs font-bold hover:bg-blue-100 transition-colors disabled:opacity-50"
+                                    >
+                                        {isTransferring ? '↻ Transferring...' : `⇄ Transfer to ${activeWallet === 'web' ? '📱 Telegram' : '🌐 Web'} Wallet`}
+                                    </button>
+                                )}
+
                                 {Number(savingsAssets) > 0 && (
                                     <div className="p-4 rounded-2xl bg-blue-50 border border-blue-100 flex flex-col space-y-3 animate-in fade-in slide-in-from-bottom-2 duration-700">
                                         <div className="flex items-center justify-between">
@@ -934,6 +843,13 @@ window.location.reload();
                                 </div>
                             ) : (
                                 <>
+                                    {/* Wallet selector for send tab */}
+                                    {telegramWalletAddress && circleAddress && (
+                                        <div className="flex gap-2">
+                                            <button onClick={() => setActiveWallet('web')} className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all ${activeWallet === 'web' ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-500'}`}>🌐 Web</button>
+                                            <button onClick={() => setActiveWallet('telegram')} className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all ${activeWallet === 'telegram' ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-500'}`}>📱 Telegram</button>
+                                        </div>
+                                    )}
                                     <div>
                                         <label className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2 block">Recipient</label>
                                         <input type="text" placeholder="@username or 0xAddress" value={recipient} onChange={(e) => setRecipient(e.target.value)} className="w-full p-4 bg-slate-50 rounded-2xl font-mono text-sm font-bold text-slate-900 outline-none focus:ring-2 focus:ring-blue-500 transition-all border border-transparent focus:border-blue-500" />
@@ -976,9 +892,16 @@ window.location.reload();
                                         <input type="text" placeholder="What's this for?" value={memo} onChange={(e) => setMemo(e.target.value)} className="w-full p-4 bg-slate-50 rounded-2xl text-sm font-bold text-slate-900 outline-none focus:ring-2 focus:ring-blue-500 transition-all border border-transparent focus:border-blue-500" />
                                     </div>
                                     <div className="pt-4 mt-auto">
-                                        <button onClick={handleDoSend} disabled={!amount || !isAddressValid || isPending || isConfirming} className="w-full py-4 bg-[#005ddb] text-white font-bold rounded-2xl hover:bg-blue-600 shadow-xl shadow-blue-500/20 transition-all disabled:opacity-50 disabled:shadow-none flex items-center justify-center transform active:scale-95">
-                                            {isPending || isConfirming ? 'Processing Transaction...' : 'Confirm Send'}
-                                        </button>
+                                        {isLinkedCircleOnTelegram ? (
+                                            <div className="w-full py-4 bg-slate-100 rounded-2xl text-center">
+                                                <p className="text-slate-500 text-sm font-bold">🌐 Web wallet sends require web login</p>
+                                                <p className="text-xs text-slate-400 mt-1">Switch to 📱 Telegram wallet above to send</p>
+                                            </div>
+                                        ) : (
+                                            <button onClick={handleDoSend} disabled={!amount || !isAddressValid || isPending || isConfirming} className="w-full py-4 bg-[#005ddb] text-white font-bold rounded-2xl hover:bg-blue-600 shadow-xl shadow-blue-500/20 transition-all disabled:opacity-50 disabled:shadow-none flex items-center justify-center transform active:scale-95">
+                                                {isPending || isConfirming ? 'Processing Transaction...' : 'Confirm Send'}
+                                            </button>
+                                        )}
                                     </div>
                                     {isConnectorError && (
                                         <div className="mt-4 p-4 bg-red-50 text-red-600 rounded-xl text-center">
@@ -999,6 +922,13 @@ window.location.reload();
 
                     {activeTab === 'RECEIVE' && (
                         <div className="text-center py-8 flex flex-col items-center">
+                            {/* Wallet selector for receive tab */}
+                            {telegramWalletAddress && circleAddress && (
+                                <div className="flex gap-2 w-full mb-4">
+                                    <button onClick={() => setActiveWallet('web')} className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all ${activeWallet === 'web' ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-500'}`}>🌐 Web</button>
+                                    <button onClick={() => setActiveWallet('telegram')} className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all ${activeWallet === 'telegram' ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-500'}`}>📱 Telegram</button>
+                                </div>
+                            )}
                             <div className="bg-white p-4 rounded-3xl border-2 border-slate-100 inline-block mb-6 shadow-sm">
                                 <div className="w-56 h-56 bg-white border border-slate-100 rounded-xl flex items-center justify-center text-slate-300 relative overflow-hidden">
                                     <img src={`https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${address}`} alt="Wallet QR Code" className="w-full h-full object-cover" />
