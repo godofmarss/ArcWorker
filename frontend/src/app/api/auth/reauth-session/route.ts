@@ -31,7 +31,8 @@ export async function POST(request: Request) {
 
         await sql`UPDATE users SET otp_code = NULL, otp_expires_at = NULL WHERE id = ${user.id}`;
 
-        const circleUserId = user.user_id || user.email || String(user.id);
+        const circleUserId = String(user.id);
+console.log(`[ReAuth] Creating session for Circle ID: ${circleUserId}`);
 console.log(`[ReAuth] Creating session for Circle ID: ${circleUserId}`);
 const session = await createCircleSession(circleUserId);
 
