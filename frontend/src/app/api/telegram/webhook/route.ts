@@ -80,6 +80,36 @@ export async function POST(request: Request) {
                 }
             );
         }
+        // Agent query — any non-command message
+else if (text && !text.startsWith('/')) {
+    // Look up user's wallet
+    const userResult = await fetch(`${process.env.NEXT_PUBLIC_URL}/api/auth/telegram-lookup`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ telegramId: String(message.from.id) })
+    }).then(r => r.json());
+
+    if (!userResult.walletAddress) {
+        await sendMessage(chatId, '❌ No wallet found. Please open the ArcWorker app first.');
+    } else {
+        await sendMessage(chatId, '🤔 Processing your query... (costs $0.01 USDC)');
+        const agentRes = await fetch(`${process.env.NEXT_PUBLIC_URL}/api/agent/pay-and-query`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                query: text,
+                walletAddress: userResult.walletAddress,
+                walletType: userResult.walletType
+            })
+        }).then(r => r.json());
+
+        if (agentRes.error) {
+            await sendMessage(chatId, `❌ Error: ${agentRes.error}`);
+        } else {
+            await sendMessage(chatId, `🤖 *ArcWorker Agent*\n\n${agentRes.answer}\n\n_Cost: $${agentRes.cost} USDC deducted from your wallet_`);
+        }
+    }
+}
 
         return NextResponse.json({ ok: true });
     } catch (e: any) {
