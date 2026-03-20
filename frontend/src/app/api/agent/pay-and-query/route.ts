@@ -89,6 +89,18 @@ export async function POST(request: Request) {
 
         console.log(`[Agent] Query from ${walletAddress}: "${query}" | Cost: $${PRICE}`);
 
+        // Record to activity feed
+await fetch(`${process.env.NEXT_PUBLIC_URL}/api/social/payment`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+        fromAddress: walletAddress,
+        toAddress: AGENT_WALLET,
+        amount: PRICE,
+        symbol: 'USDC',
+        memo: `🤖 Agent query: "${query.substring(0, 50)}${query.length > 50 ? '...' : ''}"`,
+    })
+}).catch(() => {});
         return NextResponse.json({
             success: true,
             answer,
