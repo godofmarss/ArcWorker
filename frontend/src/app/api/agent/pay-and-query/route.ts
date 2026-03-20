@@ -43,7 +43,7 @@ export async function POST(request: Request) {
             return NextResponse.json({ error: 'Missing query or walletAddress' }, { status: 400 });
         }
 
-        const PRICE = '0.01'; // $0.01 USDC per query
+        const PRICE = '0.0001'; // $0.0001 USDC per query
         const AGENT_WALLET = process.env.X402_AGENT_WALLET || '0x4435ff7d8066a8f83af26fbb9434793f73ddb6e0';
         const entitySecret = (process.env.CIRCLE_ENTITY_SECRET || '').replace(/['"]+/g, '').trim();
 
