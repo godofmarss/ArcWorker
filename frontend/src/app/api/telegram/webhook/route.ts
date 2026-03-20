@@ -38,10 +38,10 @@ export async function POST(request: Request) {
 
             if (data === 'start_earning') {
                 await sendMessage(chatId,
-                    `🚀 *Let's get you earning!*\n\nComplete simple AI tasks — surveys, labeling, reviews — and get paid instantly in *USDC* to your wallet.\n\n⚡ No KYC. No delays. Just work and earn.`,
+                    `*Let's get you earning!*\n\nComplete simple AI tasks — surveys, labeling, reviews — and get paid instantly in *USDC* to your wallet.\n\nNo KYC. No delays. Just work and earn.`,
                     {
                         inline_keyboard: [[
-                            { text: '🎯 Open ArcWorker', web_app: { url: APP_URL } }
+                            { text: 'Open ArcWorker', web_app: { url: APP_URL } }
                         ]]
                     }
                 );
@@ -49,10 +49,10 @@ export async function POST(request: Request) {
 
             if (data === 'learn_more') {
                 await sendMessage(chatId,
-                    `📖 *How ArcWorker works:*\n\n1️⃣ Open the app\n2️⃣ Pick a task — surveys, AI labeling, reviews\n3️⃣ Submit your answer\n4️⃣ Get paid instantly in *USDC*\n\n💼 Your wallet is created automatically — no setup needed.\n🔒 Powered by Circle & blockchain escrow.`,
+                    `*How ArcWorker works:*\n\n1. Open the app\n2. Pick a task — surveys, AI labeling, reviews\n3. Submit your answer\n4. Get paid instantly in *USDC*\n\nYour wallet is created automatically. Powered by Circle & blockchain escrow.`,
                     {
                         inline_keyboard: [[
-                            { text: '💰 Start Earning Now', web_app: { url: APP_URL } }
+                            { text: 'Start Earning Now', web_app: { url: APP_URL } }
                         ]]
                     }
                 );
@@ -71,7 +71,7 @@ export async function POST(request: Request) {
 
         if (text === '/start') {
             await sendMessage(chatId,
-                `👋 Hey *${firstName}*! Welcome to *ArcWorker*.\n\nWould you like to earn some *USDC* today?`,
+                `Hey *${firstName}*, welcome to *ArcWorker*.\n\nEarn USDC by completing tasks, or ask the agent anything.\n\nType /help to see what I can do.`,
                 {
                     inline_keyboard: [[
                         { text: '💰 Yes, Let\'s Go!', callback_data: 'start_earning' },
@@ -79,37 +79,71 @@ export async function POST(request: Request) {
                     ]]
                 }
             );
-        }
-        // Agent query — any non-command message
-else if (text && !text.startsWith('/')) {
-    // Look up user's wallet
-    const userResult = await fetch(`${process.env.NEXT_PUBLIC_URL}/api/auth/telegram-lookup`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ telegramId: String(message.from.id) })
-    }).then(r => r.json());
 
-    if (!userResult.walletAddress) {
-        await sendMessage(chatId, '❌ No wallet found. Please open the ArcWorker app first.');
-    } else {
-        await sendMessage(chatId, '🤔 Processing your query... (costs $0.01 USDC)');
-        const agentRes = await fetch(`${process.env.NEXT_PUBLIC_URL}/api/agent/pay-and-query`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                query: text,
-                walletAddress: userResult.walletAddress,
-                walletType: userResult.walletType
-            })
-        }).then(r => r.json());
+        } else if (text === '/help') {
+            await sendMessage(chatId,
+                `*ArcWorker Commands*\n\n/start — Welcome screen\n/app — Open ArcWorker\n/balance — Check your wallet\n/help — Show this menu\n\nOr just type any message and the agent will respond.\n\n_Each query costs $0.0001 USDC._`
+            );
 
-        if (agentRes.error) {
-            await sendMessage(chatId, `❌ Error: ${agentRes.error}`);
-        } else {
-            await sendMessage(chatId, `🤖 *ArcWorker Agent*\n\n${agentRes.answer}\n\n_Cost: $${agentRes.cost} USDC deducted from your wallet_`);
+        } else if (text === '/app') {
+            await sendMessage(chatId,
+                `Open ArcWorker:`,
+                {
+                    inline_keyboard: [[
+                        { text: 'Open ArcWorker', web_app: { url: APP_URL } }
+                    ]]
+                }
+            );
+
+        } else if (text === '/balance') {
+            const userResult = await fetch(`${process.env.NEXT_PUBLIC_URL}/api/auth/telegram-lookup`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ telegramId: String(message.from.id) })
+            }).then(r => r.json());
+
+            if (!userResult.walletAddress) {
+                await sendMessage(chatId, 'No wallet found. Open the ArcWorker app first.');
+            } else {
+                await sendMessage(chatId, `Your wallet:\n\`${userResult.walletAddress}\`\n\nOpen the app to see your full balance.`, {
+                    inline_keyboard: [[{ text: 'Open Wallet', web_app: { url: APP_URL } }]]
+                });
+            }
+
+        } else if (text && !text.startsWith('/') && text.trim().length <= 10) {
+            // Short messages — free response
+            await sendMessage(chatId, `Hey ${firstName}! Ask me anything and I'll help.\n\nEach query costs $0.0001 USDC. Type /help to see all commands.`);
+
+        } else if (text && !text.startsWith('/') && text.trim().length > 10) {
+            // Agent query
+            const userResult = await fetch(`${process.env.NEXT_PUBLIC_URL}/api/auth/telegram-lookup`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ telegramId: String(message.from.id) })
+            }).then(r => r.json());
+
+            if (!userResult.walletAddress) {
+                await sendMessage(chatId, 'No wallet found. Please open the ArcWorker app first to set up your wallet.');
+            } else {
+                await sendMessage(chatId, '_Processing..._');
+
+                const agentRes = await fetch(`${process.env.NEXT_PUBLIC_URL}/api/agent/pay-and-query`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        query: text,
+                        walletAddress: userResult.walletAddress,
+                        walletType: userResult.walletType
+                    })
+                }).then(r => r.json());
+
+                if (agentRes.error) {
+                    await sendMessage(chatId, `Error: ${agentRes.error}`);
+                } else {
+                    await sendMessage(chatId, `*ArcWorker Agent*\n\n${agentRes.answer}\n\n_$${agentRes.cost} USDC deducted_`);
+                }
+            }
         }
-    }
-}
 
         return NextResponse.json({ ok: true });
     } catch (e: any) {
