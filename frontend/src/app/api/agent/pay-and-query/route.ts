@@ -50,12 +50,26 @@ export async function POST(request: Request) {
         // Deduct payment from user wallet (dev_circle - server side)
         if (walletType === 'dev_circle' || walletType === 'circle') {
             const walletId = await getWalletId(walletAddress);
-            if (!walletId) return NextResponse.json({ error: 'Wallet not found' }, { status: 404 });
+if (!walletId) return NextResponse.json({ error: 'Wallet not found' }, { status: 404 });
 
-            const ciphertext = await generateCiphertext(entitySecret);
+// Check balance before deducting
+const balanceRes = await devClient.get(`/wallets/${walletId}/balances`);
+const balances = balanceRes.data.data?.tokenBalances || [];
+const usdcBalance = balances.find((b: any) => 
+    b.token?.symbol === 'USDC' || b.token?.isNative
+);
+const currentBalance = parseFloat(usdcBalance?.amount || '0');
 
-            // Transfer $0.01 USDC from user to agent wallet
-            await devClient.post('/developer/transactions/transfer', {
+if (currentBalance < parseFloat(PRICE)) {
+    return NextResponse.json({ 
+        error: `Insufficient balance. You need at least $${PRICE} USDC. Current balance: $${currentBalance.toFixed(4)} USDC.` 
+    }, { status: 400 });
+}
+
+const ciphertext = await generateCiphertext(entitySecret);
+
+// Transfer USDC from user to agent wallet
+await devClient.post('/developer/transactions/transfer', {
                 idempotencyKey: crypto.randomUUID(),
                 entitySecretCiphertext: ciphertext,
                 walletId,
